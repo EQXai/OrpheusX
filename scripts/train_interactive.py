@@ -6,6 +6,7 @@ adapters before executing the training procedure.
 """
 import os
 import subprocess
+import sys
 from pathlib import Path
 from unsloth import FastLanguageModel, is_bfloat16_supported
 from datasets import load_dataset, load_from_disk
@@ -47,19 +48,24 @@ print("2. Local Whisper dataset")
 choice = input("Choice [1]: ").strip() or "1"
 dataset = None
 if choice == "2":
-    ds_path = input("Path to local dataset (folder or audio file): ").strip()
-    if os.path.isfile(ds_path):
-        out_dir = os.path.join(DATA_DIR, Path(ds_path).stem)
-        os.makedirs(out_dir, exist_ok=True)
-        subprocess.run([
-            "python",
-            os.path.join(os.path.dirname(__file__), "prepare_dataset.py"),
-            ds_path,
-            out_dir,
-        ])
-        dataset = load_from_disk(out_dir)
+    test_root = os.path.join(DATA_DIR, "test")
+    if not os.path.isdir(test_root):
+        print(f"Directory {test_root} does not exist.")
+        sys.exit(1)
+    test_dirs = [d for d in os.listdir(test_root) if os.path.isdir(os.path.join(test_root, d))]
+    if not test_dirs:
+        print(f"No se encontraron datasets en {test_root}.")
+        sys.exit(1)
+    print("Seleccione el dataset:")
+    for idx, name in enumerate(test_dirs, 1):
+        print(f"{idx}. {name}")
+    sub_choice = input("Elección [1]: ").strip() or "1"
+    if sub_choice.isdigit() and 1 <= int(sub_choice) <= len(test_dirs):
+        selected = test_dirs[int(sub_choice) - 1]
     else:
-        dataset = load_from_disk(ds_path)
+        selected = test_dirs[0]
+    ds_path = os.path.join(test_root, selected)
+    dataset = load_from_disk(ds_path)
 else:
     dataset_link = input(f"Dataset to load [{default_dataset}]: ").strip() or default_dataset
     dataset = load_dataset(dataset_link, split="train", cache_dir=DATA_DIR)
