@@ -1,7 +1,5 @@
 # OrpheusX TTS Scripts
 
-This repository contains helper scripts to train and run the Orpheus 3B text-to-speech model outside Google Colab.
-
 ## Installation
 
 Run the installation script to fetch all dependencies. It creates a virtual environment named `venv` in the repository root and installs PyTorch 2.6.0 built for CUDA 12.4 automatically. The script also warns if your CUDA runtime is newer.  
@@ -16,8 +14,6 @@ After installation activate the environment:
 ```bash
 source venv/bin/activate
 ```
-
-The installer will also print this command once it finishes.
 
 **Important:** OrpheusX only supports CUDA 12.4 or lower. Using a newer CUDA runtime may cause installation failures.
 
@@ -34,17 +30,17 @@ python scripts/check_env.py
 Execute the training script to download the dataset, preprocess it and start training. Models and datasets are cached under `models/` and `data/` in the repository root.
 
 ```bash
-python scripts/train.py
+python scripts/train_interactive.py
 ```
 
 Training settings mirror those found in the original notebook (60 steps, LoRA adapters etc.). The resulting LoRA weights will be written under `lora_models/<name>/lora_model/`.
 
 ## Inference
 
-Run interactive inference to generate audio from custom text. By default the script will look for LoRA adapters under `lora_models/<name>/lora_model/`. You may optionally specify a different model name or path.
+Run interactive inference to generate audio from custom text. 
 
 ```bash
-python scripts/infer.py --model unsloth/orpheus-3b-0.1-ft --lora lora_models/my_lora/lora_model
+python scripts/infer_interactive.py
 ```
 
 The script prompts for text and writes `output.wav` containing the generated audio.
