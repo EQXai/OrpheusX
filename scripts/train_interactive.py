@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 from unsloth import FastLanguageModel, is_bfloat16_supported
-from datasets import load_dataset, load_from_disk
+from datasets import load_dataset, load_from_disk, concatenate_datasets
 import torchaudio.transforms as T
 from snac import SNAC
 import torch
@@ -56,17 +56,25 @@ if choice == "2":
     if not dataset_dirs:
         print(f"No datasets found in {dataset_root}.")
         sys.exit(1)
-    print("Select the dataset:")
+    print("Select the dataset(s) (comma separated numbers):")
     for idx, name in enumerate(dataset_dirs, 1):
         print(f"{idx}. {name}")
-    sub_choice = input("Choice [1]: ").strip() or "1"
-    if sub_choice.isdigit() and 1 <= int(sub_choice) <= len(dataset_dirs):
-        selected = dataset_dirs[int(sub_choice) - 1]
-    else:
-        selected = dataset_dirs[0]
-    ds_path = os.path.join(dataset_root, selected)
-
-    dataset = load_from_disk(ds_path)
+    sub_choice = input("Choice(s) [1]: ").strip() or "1"
+    indices = []
+    for part in sub_choice.split(','):
+        part = part.strip()
+        if part.isdigit():
+            idx = int(part)
+            if 1 <= idx <= len(dataset_dirs):
+                indices.append(idx)
+    if not indices:
+        indices = [1]
+    datasets_list = []
+    for idx in indices:
+        selected = dataset_dirs[idx - 1]
+        ds_path = os.path.join(dataset_root, selected)
+        datasets_list.append(load_from_disk(ds_path))
+    dataset = datasets_list[0] if len(datasets_list) == 1 else concatenate_datasets(datasets_list)
 else:
     dataset_link = input(f"Dataset to load [{default_dataset}]: ").strip() or default_dataset
     dataset = load_dataset(dataset_link, split="train", cache_dir=DATA_DIR)
