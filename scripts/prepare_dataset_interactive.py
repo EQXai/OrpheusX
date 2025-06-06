@@ -37,6 +37,8 @@ def main() -> None:
     audio_path = audio_dir / selected
     output_dir = dataset_root / Path(selected).stem
     prepare_dataset(str(audio_path), str(output_dir))
+    print(f"Dataset directory: {output_dir.resolve()}")
+    print(f"Parquet file: {(output_dir / 'dataset.parquet').resolve()}")
 
 
 if __name__ == "__main__":
