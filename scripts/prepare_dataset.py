@@ -38,9 +38,25 @@ def prepare_dataset(audio_path: str, output_dir: str) -> None:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     dataset.save_to_disk(output_dir)
+
+    # Build a DataFrame with the raw audio bytes so the Parquet file is
+    # completely self‑contained (otherwise only the file paths are stored).
+    import pandas as pd
+
+    rows = []
+    for item in dataset:
+        audio_path = item["audio"]["path"]
+        sr = item["audio"]["sampling_rate"]
+        with open(audio_path, "rb") as f:
+            audio_bytes = f.read()
+        rows.append({"audio": audio_bytes, "sampling_rate": sr, "text": item["text"]})
+
+    df = pd.DataFrame(rows)
+
     # Also store the dataset in Parquet format for easy sharing
     parquet_path = output_dir / "dataset.parquet"
-    dataset.to_parquet(parquet_path)
+    df.to_parquet(parquet_path)
+
     print(f"Dataset saved under {output_dir.resolve()}")
     print(f"Parquet file written to {parquet_path.resolve()}")
 
