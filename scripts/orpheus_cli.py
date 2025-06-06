@@ -34,11 +34,11 @@ def infer():
 
 
 MENU_OPTIONS = {
-    "1": ("Instalacion", install),
-    "2": ("Crear dataset", create_dataset),
-    "3": ("Entrenamiento", train),
-    "4": ("Inferencia", infer),
-    "5": ("Salir", None),
+    "1": ("Installation", install),
+    "2": ("Create dataset", create_dataset),
+    "3": ("Training", train),
+    "4": ("Inference", infer),
+    "5": ("Exit", None),
 }
 
 
@@ -47,13 +47,13 @@ def main() -> None:
         print("\nOrpheusX CLI")
         for key, (label, _) in MENU_OPTIONS.items():
             print(f"{key}. {label}")
-        choice = input("Elige una opcion [5]: ").strip() or "5"
+        choice = input("Choose an option [5]: ").strip() or "5"
         if choice == "5":
             print("Bye!")
             break
         action = MENU_OPTIONS.get(choice)
         if not action:
-            print("Opcion invalida")
+            print("Invalid option")
             continue
         _, func = action
         func()
