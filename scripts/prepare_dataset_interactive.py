@@ -24,21 +24,29 @@ def main() -> None:
         print("No audio files found in 'source_audio'.")
         return
 
-    print("Select the audio file to process:")
+    print("Select the audio file(s) to process (comma separated numbers):")
     for idx, name in enumerate(audio_files, 1):
         print(f"{idx}. {name}")
 
-    choice = input("Choice [1]: ").strip() or "1"
-    if not choice.isdigit() or not (1 <= int(choice) <= len(audio_files)):
-        selected = audio_files[0]
-    else:
-        selected = audio_files[int(choice) - 1]
+    choice = input("Choice(s) [1]: ").strip() or "1"
+    indices = []
+    for part in choice.split(','):
+        part = part.strip()
+        if part.isdigit():
+            idx = int(part)
+            if 1 <= idx <= len(audio_files):
+                indices.append(idx)
 
-    audio_path = audio_dir / selected
-    output_dir = dataset_root / Path(selected).stem
-    prepare_dataset(str(audio_path), str(output_dir))
-    print(f"Dataset directory: {output_dir.resolve()}")
-    print(f"Parquet file: {(output_dir / 'dataset.parquet').resolve()}")
+    if not indices:
+        indices = [1]
+
+    for idx in indices:
+        selected = audio_files[idx - 1]
+        audio_path = audio_dir / selected
+        output_dir = dataset_root / Path(selected).stem
+        prepare_dataset(str(audio_path), str(output_dir))
+        print(f"Dataset directory: {output_dir.resolve()}")
+        print(f"Parquet file: {(output_dir / 'dataset.parquet').resolve()}")
 
 
 if __name__ == "__main__":
