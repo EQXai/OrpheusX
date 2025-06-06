@@ -7,8 +7,14 @@ converted into a ``datasets`` Dataset and saved to disk so that it can be loaded
 with ``load_from_disk``.
 """
 import os
+import sys
 from pathlib import Path
 from datasets import Audio, Dataset
+
+# Make sure the repository root is on the Python path so ``tools`` can be found
+repo_root = Path(__file__).resolve().parent.parent
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
 
 # Import helper functions from the Whisper package
 from tools.Whisper import run as whisper_run
