@@ -1,0 +1,64 @@
+# OrpheusX TTS Scripts
+
+This repository contains helper scripts to train and run the Orpheus 3B text-to-speech model outside Google Colab.
+
+## Installation
+
+Run the installation script to fetch all dependencies. It creates a virtual environment named `venv` in the repository root and installs PyTorch 2.6.0 built for CUDA 12.4 automatically. The script also warns if your CUDA runtime is newer.  
+It installs WhisperX and its requirements (`librosa`, `soundfile` and the `ffmpeg` binary) so you can generate datasets from audio files directly.
+
+```bash
+bash scripts/install.sh
+```
+
+After installation activate the environment:
+
+```bash
+source venv/bin/activate
+```
+
+The installer will also print this command once it finishes.
+
+**Important:** OrpheusX only supports CUDA 12.4 or lower. Using a newer CUDA runtime may cause installation failures.
+
+## Verify your environment
+
+Use the environment check script to confirm that all required packages are available and that CUDA is detected.
+
+```bash
+python scripts/check_env.py
+```
+
+## Training
+
+Execute the training script to download the dataset, preprocess it and start training. Models and datasets are cached under `models/` and `data/` in the repository root.
+
+```bash
+python scripts/train.py
+```
+
+Training settings mirror those found in the original notebook (60 steps, LoRA adapters etc.). The resulting LoRA weights will be written under `lora_models/<name>/lora_model/`.
+
+## Inference
+
+Run interactive inference to generate audio from custom text. By default the script will look for LoRA adapters under `lora_models/<name>/lora_model/`. You may optionally specify a different model name or path.
+
+```bash
+python scripts/infer.py --model unsloth/orpheus-3b-0.1-ft --lora lora_models/my_lora/lora_model
+```
+
+The script prompts for text and writes `output.wav` containing the generated audio.
+
+## Interactive scripts
+
+For convenience, `train_interactive.py` and `infer_interactive.py` provide an interactive workflow. They ask for dataset links, a name for each LoRA and inference prompts on the command line. Generated audio is saved under `audio_output/` without overwriting existing files.
+
+## Preparing datasets with Whisper
+
+The `Whisper` directory contains tools to convert long audio recordings into a Hugging Face style dataset. Use `prepare_dataset.py` to create a local dataset from an audio file:
+
+```bash
+python scripts/prepare_dataset.py path/to/audio.mp3 data/my_dataset
+```
+
+The script runs WhisperX to transcribe and segment the audio, then saves a dataset under `data/my_dataset`. You can load this dataset in the interactive training script by choosing the *Local Whisper dataset* option and providing the saved folder path.
