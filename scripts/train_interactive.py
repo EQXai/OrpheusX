@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 """Interactive wrapper around ``train.py``.
 
-Prompts the user for dataset location and a name for the resulting LoRA
-adapters before executing the training procedure.
+Prompts the user for dataset location and then trains a separate LoRA
+adapter for each selected dataset. The adapter directory name matches the
+dataset name so the user isn't asked for a custom LoRA name.
 """
 import os
 import subprocess
@@ -15,29 +16,9 @@ from snac import SNAC
 import torch
 from transformers import TrainingArguments, Trainer
 
-# Load model and tokenizer
+# Model constants
 MODEL_NAME = os.environ.get('MODEL_NAME', 'unsloth/orpheus-3b-0.1-ft')
 CACHE_DIR = os.path.join(os.path.dirname(__file__), '..', 'models')
-model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name=MODEL_NAME,
-    max_seq_length=2048,
-    dtype=None,
-    load_in_4bit=False,
-    cache_dir=CACHE_DIR,
-)
-
-model = FastLanguageModel.get_peft_model(
-    model,
-    r=64,
-    target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-    lora_alpha=64,
-    lora_dropout=0,
-    bias="none",
-    use_gradient_checkpointing="unsloth",
-    random_state=3407,
-    use_rslora=False,
-    loftq_config=None,
-)
 
 # dataset loading with interactive prompt
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'datasets')
@@ -46,7 +27,7 @@ print("Select dataset source:")
 print("1. Hugging Face link")
 print("2. Local Whisper dataset")
 choice = input("Choice [1]: ").strip() or "1"
-dataset = None
+dataset_info = []
 if choice == "2":
     dataset_root = DATA_DIR
     if not os.path.isdir(dataset_root):
@@ -69,169 +50,199 @@ if choice == "2":
                 indices.append(idx)
     if not indices:
         indices = [1]
-    datasets_list = []
     for idx in indices:
         selected = dataset_dirs[idx - 1]
         ds_path = os.path.join(dataset_root, selected)
-        datasets_list.append(load_from_disk(ds_path))
-    dataset = datasets_list[0] if len(datasets_list) == 1 else concatenate_datasets(datasets_list)
+        dataset_info.append((ds_path, selected, True))
 else:
     dataset_link = input(f"Dataset to load [{default_dataset}]: ").strip() or default_dataset
-    dataset = load_dataset(dataset_link, split="train", cache_dir=DATA_DIR)
+    name = dataset_link.split('/')[-1]
+    dataset_info.append((dataset_link, name, False))
 
-default_lora_name = "run1"
-lora_name = input(f"Name for this LoRA [{default_lora_name}]: ").strip() or default_lora_name
-save_dir = os.path.join("lora_models", lora_name, "lora_model")
-os.makedirs(save_dir, exist_ok=True)
+def train_dataset(dataset_source: str, lora_name: str, is_local: bool) -> None:
+    """Train a LoRA on a single dataset."""
 
-# Tokenization functions
-ds_sample_rate = dataset[0]["audio"]["sampling_rate"]
-snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz", cache_dir=CACHE_DIR)
-snac_model = snac_model.to("cuda")
+    # Load dataset
+    if is_local:
+        dataset = load_from_disk(dataset_source)
+    else:
+        dataset = load_dataset(dataset_source, split="train", cache_dir=DATA_DIR)
 
-import locale
-locale.getpreferredencoding = lambda: "UTF-8"
+    # Load model and tokenizer fresh for each dataset
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name=MODEL_NAME,
+        max_seq_length=2048,
+        dtype=None,
+        load_in_4bit=False,
+        cache_dir=CACHE_DIR,
+    )
 
-def tokenise_audio(waveform):
-    waveform = torch.from_numpy(waveform).unsqueeze(0)
-    waveform = waveform.to(dtype=torch.float32)
-    resample_transform = T.Resample(orig_freq=ds_sample_rate, new_freq=24000)
-    waveform = resample_transform(waveform)
-    waveform = waveform.unsqueeze(0).to("cuda")
-    with torch.inference_mode():
-        codes = snac_model.encode(waveform)
-    all_codes = []
-    for i in range(codes[0].shape[1]):
-        all_codes.append(codes[0][0][i].item() + 128266)
-        all_codes.append(codes[1][0][2 * i].item() + 128266 + 4096)
-        all_codes.append(codes[2][0][4 * i].item() + 128266 + (2 * 4096))
-        all_codes.append(codes[2][0][(4 * i) + 1].item() + 128266 + (3 * 4096))
-        all_codes.append(codes[1][0][(2 * i) + 1].item() + 128266 + (4 * 4096))
-        all_codes.append(codes[2][0][(4 * i) + 2].item() + 128266 + (5 * 4096))
-        all_codes.append(codes[2][0][(4 * i) + 3].item() + 128266 + (6 * 4096))
-    return all_codes
+    model = FastLanguageModel.get_peft_model(
+        model,
+        r=64,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        lora_alpha=64,
+        lora_dropout=0,
+        bias="none",
+        use_gradient_checkpointing="unsloth",
+        random_state=3407,
+        use_rslora=False,
+        loftq_config=None,
+    )
 
-def add_codes(example):
-    codes_list = None
-    try:
-        answer_audio = example.get("audio")
-        if answer_audio and "array" in answer_audio:
-            audio_array = answer_audio["array"]
-            codes_list = tokenise_audio(audio_array)
-    except Exception as e:
-        print(f"Skipping row due to error: {e}")
-    example["codes_list"] = codes_list
-    return example
+    save_dir = os.path.join("lora_models", lora_name.replace("/", "_"), "lora_model")
+    os.makedirs(save_dir, exist_ok=True)
 
-dataset = dataset.map(add_codes, remove_columns=["audio"])
+    ds_sample_rate = dataset[0]["audio"]["sampling_rate"]
+    snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz", cache_dir=CACHE_DIR)
+    snac_model = snac_model.to("cuda")
 
-# Special tokens
-TOKENISER_LENGTH = 128256
-start_of_text = 128000
-end_of_text = 128009
-start_of_speech = TOKENISER_LENGTH + 1
-end_of_speech = TOKENISER_LENGTH + 2
-start_of_human = TOKENISER_LENGTH + 3
-end_of_human = TOKENISER_LENGTH + 4
-start_of_ai = TOKENISER_LENGTH + 5
-end_of_ai = TOKENISER_LENGTH + 6
-pad_token = TOKENISER_LENGTH + 7
+    import locale
+    locale.getpreferredencoding = lambda: "UTF-8"
 
-audio_tokens_start = TOKENISER_LENGTH + 10
+    def tokenise_audio(waveform):
+        waveform = torch.from_numpy(waveform).unsqueeze(0)
+        waveform = waveform.to(dtype=torch.float32)
+        resample_transform = T.Resample(orig_freq=ds_sample_rate, new_freq=24000)
+        waveform = resample_transform(waveform)
+        waveform = waveform.unsqueeze(0).to("cuda")
+        with torch.inference_mode():
+            codes = snac_model.encode(waveform)
+        all_codes = []
+        for i in range(codes[0].shape[1]):
+            all_codes.append(codes[0][0][i].item() + 128266)
+            all_codes.append(codes[1][0][2 * i].item() + 128266 + 4096)
+            all_codes.append(codes[2][0][4 * i].item() + 128266 + (2 * 4096))
+            all_codes.append(codes[2][0][(4 * i) + 1].item() + 128266 + (3 * 4096))
+            all_codes.append(codes[1][0][(2 * i) + 1].item() + 128266 + (4 * 4096))
+            all_codes.append(codes[2][0][(4 * i) + 2].item() + 128266 + (5 * 4096))
+            all_codes.append(codes[2][0][(4 * i) + 3].item() + 128266 + (6 * 4096))
+        return all_codes
 
-dataset = dataset.filter(lambda x: x["codes_list"] is not None)
-dataset = dataset.filter(lambda x: len(x["codes_list"]) > 0)
+    def add_codes(example):
+        codes_list = None
+        try:
+            answer_audio = example.get("audio")
+            if answer_audio and "array" in answer_audio:
+                audio_array = answer_audio["array"]
+                codes_list = tokenise_audio(audio_array)
+        except Exception as e:
+            print(f"Skipping row due to error: {e}")
+        example["codes_list"] = codes_list
+        return example
 
-def remove_duplicate_frames(example):
-    vals = example["codes_list"]
-    if len(vals) % 7 != 0:
-        raise ValueError("Input list length must be divisible by 7")
-    result = vals[:7]
-    for i in range(7, len(vals), 7):
-        current_first = vals[i]
-        previous_first = result[-7]
-        if current_first != previous_first:
-            result.extend(vals[i:i + 7])
-    example["codes_list"] = result
-    return example
+    dataset = dataset.map(add_codes, remove_columns=["audio"])
 
-dataset = dataset.map(remove_duplicate_frames)
+    TOKENISER_LENGTH = 128256
+    start_of_text = 128000
+    end_of_text = 128009
+    start_of_speech = TOKENISER_LENGTH + 1
+    end_of_speech = TOKENISER_LENGTH + 2
+    start_of_human = TOKENISER_LENGTH + 3
+    end_of_human = TOKENISER_LENGTH + 4
+    start_of_ai = TOKENISER_LENGTH + 5
+    end_of_ai = TOKENISER_LENGTH + 6
+    pad_token = TOKENISER_LENGTH + 7
 
-tok_info = """*** HERE you can modify the text prompt
+    audio_tokens_start = TOKENISER_LENGTH + 10
+
+    dataset = dataset.filter(lambda x: x["codes_list"] is not None)
+    dataset = dataset.filter(lambda x: len(x["codes_list"]) > 0)
+
+    def remove_duplicate_frames(example):
+        vals = example["codes_list"]
+        if len(vals) % 7 != 0:
+            raise ValueError("Input list length must be divisible by 7")
+        result = vals[:7]
+        for i in range(7, len(vals), 7):
+            current_first = vals[i]
+            previous_first = result[-7]
+            if current_first != previous_first:
+                result.extend(vals[i:i + 7])
+        example["codes_list"] = result
+        return example
+
+    dataset = dataset.map(remove_duplicate_frames)
+
+    tok_info = """*** HERE you can modify the text prompt
 If you are training a multi-speaker model (e.g., canopylabs/orpheus-3b-0.1-ft),
 ensure that the dataset includes a 'source' field and format the input accordingly:
 - Single-speaker: f"{example['text']}"
 - Multi-speaker: f"{example['source']}: {example['text']}"
 """
-print(tok_info)
+    print(tok_info)
 
-def create_input_ids(example):
-    text_prompt = f"{example['source']}: {example['text']}" if 'source' in example else example['text']
-    text_ids = tokenizer.encode(text_prompt, add_special_tokens=True)
-    text_ids.append(end_of_text)
-    example['text_tokens'] = text_ids
-    input_ids = (
-        [start_of_human]
-        + example['text_tokens']
-        + [end_of_human]
-        + [start_of_ai]
-        + [start_of_speech]
-        + example['codes_list']
-        + [end_of_speech]
-        + [end_of_ai]
+    def create_input_ids(example):
+        text_prompt = f"{example['source']}: {example['text']}" if 'source' in example else example['text']
+        text_ids = tokenizer.encode(text_prompt, add_special_tokens=True)
+        text_ids.append(end_of_text)
+        example['text_tokens'] = text_ids
+        input_ids = (
+            [start_of_human]
+            + example['text_tokens']
+            + [end_of_human]
+            + [start_of_ai]
+            + [start_of_speech]
+            + example['codes_list']
+            + [end_of_speech]
+            + [end_of_ai]
+        )
+        example['input_ids'] = input_ids
+        example['labels'] = input_ids
+        example['attention_mask'] = [1] * len(input_ids)
+        return example
+
+    dataset = dataset.map(create_input_ids, remove_columns=['text', 'codes_list'])
+    columns_to_keep = ['input_ids', 'labels', 'attention_mask']
+    columns_to_remove = [col for col in dataset.column_names if col not in columns_to_keep]
+    dataset = dataset.remove_columns(columns_to_remove)
+
+    trainer = Trainer(
+        model=model,
+        train_dataset=dataset,
+        args=TrainingArguments(
+            per_device_train_batch_size=1,
+            gradient_accumulation_steps=4,
+            warmup_steps=5,
+            max_steps=60,
+            learning_rate=2e-4,
+            fp16=not is_bfloat16_supported(),
+            bf16=is_bfloat16_supported(),
+            logging_steps=1,
+            optim="adamw_8bit",
+            weight_decay=0.01,
+            lr_scheduler_type="linear",
+            seed=3407,
+            output_dir="outputs",
+            report_to="none",
+        ),
     )
-    example['input_ids'] = input_ids
-    example['labels'] = input_ids
-    example['attention_mask'] = [1] * len(input_ids)
-    return example
 
-dataset = dataset.map(create_input_ids, remove_columns=['text', 'codes_list'])
-columns_to_keep = ['input_ids', 'labels', 'attention_mask']
-columns_to_remove = [col for col in dataset.column_names if col not in columns_to_keep]
-dataset = dataset.remove_columns(columns_to_remove)
+    gpu_stats = torch.cuda.get_device_properties(0)
+    start_gpu_memory = round(torch.cuda.max_memory_reserved() / 1024 / 1024 / 1024, 3)
+    max_memory = round(gpu_stats.total_memory / 1024 / 1024 / 1024, 3)
+    print(f"GPU = {gpu_stats.name}. Max memory = {max_memory} GB.")
+    print(f"{start_gpu_memory} GB of memory reserved.")
 
-# Training
-trainer = Trainer(
-    model=model,
-    train_dataset=dataset,
-    args=TrainingArguments(
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=4,
-        warmup_steps=5,
-        max_steps=60,
-        learning_rate=2e-4,
-        fp16=not is_bfloat16_supported(),
-        bf16=is_bfloat16_supported(),
-        logging_steps=1,
-        optim="adamw_8bit",
-        weight_decay=0.01,
-        lr_scheduler_type="linear",
-        seed=3407,
-        output_dir="outputs",
-        report_to="none",
-    ),
-)
+    trainer_stats = trainer.train()
 
-# Memory stats before training
-gpu_stats = torch.cuda.get_device_properties(0)
-start_gpu_memory = round(torch.cuda.max_memory_reserved() / 1024 / 1024 / 1024, 3)
-max_memory = round(gpu_stats.total_memory / 1024 / 1024 / 1024, 3)
-print(f"GPU = {gpu_stats.name}. Max memory = {max_memory} GB.")
-print(f"{start_gpu_memory} GB of memory reserved.")
+    used_memory = round(torch.cuda.max_memory_reserved() / 1024 / 1024 / 1024, 3)
+    used_memory_for_lora = round(used_memory - start_gpu_memory, 3)
+    used_percentage = round(used_memory / max_memory * 100, 3)
+    lora_percentage = round(used_memory_for_lora / max_memory * 100, 3)
+    print(f"{trainer_stats.metrics['train_runtime']} seconds used for training.")
+    print(f"{round(trainer_stats.metrics['train_runtime']/60, 2)} minutes used for training.")
+    print(f"Peak reserved memory = {used_memory} GB.")
+    print(f"Peak reserved memory for training = {used_memory_for_lora} GB.")
+    print(f"Peak reserved memory % of max memory = {used_percentage} %.")
+    print(f"Peak reserved memory for training % of max memory = {lora_percentage} %.")
 
-trainer_stats = trainer.train()
+    model.save_pretrained(save_dir)
+    tokenizer.save_pretrained(save_dir)
+    print(f"LoRA adapters saved under {save_dir}")
 
-used_memory = round(torch.cuda.max_memory_reserved() / 1024 / 1024 / 1024, 3)
-used_memory_for_lora = round(used_memory - start_gpu_memory, 3)
-used_percentage = round(used_memory / max_memory * 100, 3)
-lora_percentage = round(used_memory_for_lora / max_memory * 100, 3)
-print(f"{trainer_stats.metrics['train_runtime']} seconds used for training.")
-print(f"{round(trainer_stats.metrics['train_runtime']/60, 2)} minutes used for training.")
-print(f"Peak reserved memory = {used_memory} GB.")
-print(f"Peak reserved memory for training = {used_memory_for_lora} GB.")
-print(f"Peak reserved memory % of max memory = {used_percentage} %.")
-print(f"Peak reserved memory for training % of max memory = {lora_percentage} %.")
 
-model.save_pretrained(save_dir)
-tokenizer.save_pretrained(save_dir)
-print(f"LoRA adapters saved under {save_dir}")
+for src, name, is_local in dataset_info:
+    print(f"\nStarting training for dataset: {name}\n")
+    train_dataset(src, name, is_local)
+
