@@ -65,6 +65,7 @@ if choice == "2":
     else:
         selected = dataset_dirs[0]
     ds_path = os.path.join(dataset_root, selected)
+
     dataset = load_from_disk(ds_path)
 else:
     dataset_link = input(f"Dataset to load [{default_dataset}]: ").strip() or default_dataset
