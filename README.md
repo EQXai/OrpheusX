@@ -27,7 +27,7 @@ python scripts/check_env.py
 
 ## Training
 
-Execute the training script to download the dataset, preprocess it and start training. Models and datasets are cached under `models/` and `data/` in the repository root.
+Execute the training script to download the dataset, preprocess it and start training. Models and datasets are cached under `models/` and `datasets/` in the repository root.
 
 ```bash
 python scripts/train_interactive.py
@@ -54,7 +54,7 @@ For convenience, `train_interactive.py` and `infer_interactive.py` provide an in
 The `Whisper` directory contains tools to convert long audio recordings into a Hugging Face style dataset. Use `prepare_dataset.py` to create a local dataset from an audio file:
 
 ```bash
-python scripts/prepare_dataset.py path/to/audio.mp3 data/my_dataset
+python scripts/prepare_dataset.py path/to/audio.mp3 datasets/my_dataset
 ```
 
-The script runs WhisperX to transcribe and segment the audio, then saves a dataset under `data/my_dataset`. You can load this dataset in the interactive training script by choosing the *Local Whisper dataset* option and providing the saved folder path.
+The script runs WhisperX to transcribe and segment the audio, then saves a dataset under `datasets/my_dataset`. You can load this dataset in the interactive training script by choosing the *Local Whisper dataset* option and providing the saved folder path.

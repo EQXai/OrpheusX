@@ -32,7 +32,7 @@ model = FastLanguageModel.get_peft_model(
 )
 
 # dataset loading
-DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
+DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'datasets')
 dataset = load_dataset("MrDragonFox/Elise", split="train", cache_dir=DATA_DIR)
 
 # Tokenization functions

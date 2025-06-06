@@ -39,7 +39,7 @@ model = FastLanguageModel.get_peft_model(
 )
 
 # dataset loading with interactive prompt
-DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
+DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'datasets')
 default_dataset = "MrDragonFox/Elise"
 print("Select dataset source:")
 print("1. Hugging Face link")
