@@ -31,3 +31,8 @@ pip install torch==${TORCH_VER} torchvision==0.21.0 torchaudio==${TORCH_VER} --i
 
 echo "All dependencies installed with torch==${TORCH_VER}"
 echo "Activate the environment with: source $VENV_DIR/bin/activate"
+
+# Additional CUDA dependencies
+if command -v apt >/dev/null; then
+  sudo apt install libcudnn8 libcudnn8-dev
+fi
