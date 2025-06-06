@@ -3,12 +3,18 @@
 
 This script uses the functions from ``tools/Whisper/run.py`` to transcribe an audio
 file and segment it. The resulting ``.wav`` and ``.txt`` pairs are then
-converted into a ``datasets`` Dataset and saved to disk so that it can be loaded
-with ``load_from_disk``.
+converted into a ``datasets`` Dataset and saved to disk (and as a ``.parquet``
+file) so that it can be loaded with ``load_from_disk`` or other tools.
 """
 import os
+import sys
 from pathlib import Path
 from datasets import Audio, Dataset
+
+# Make sure the repository root is on the Python path so ``tools`` can be found
+repo_root = Path(__file__).resolve().parent.parent
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
 
 # Import helper functions from the Whisper package
 from tools.Whisper import run as whisper_run
@@ -32,7 +38,11 @@ def prepare_dataset(audio_path: str, output_dir: str) -> None:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     dataset.save_to_disk(output_dir)
+    # Also store the dataset in Parquet format for easy sharing
+    parquet_path = output_dir / "dataset.parquet"
+    dataset.to_parquet(parquet_path)
     print(f"Dataset saved under {output_dir.resolve()}")
+    print(f"Parquet file written to {parquet_path.resolve()}")
 
 
 def main():

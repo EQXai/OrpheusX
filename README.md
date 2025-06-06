@@ -57,4 +57,4 @@ The `Whisper` directory contains tools to convert long audio recordings into a H
 python scripts/prepare_dataset.py path/to/audio.mp3 datasets/my_dataset
 ```
 
-The script runs WhisperX to transcribe and segment the audio, then saves a dataset under `datasets/my_dataset`. You can load this dataset in the interactive training script by choosing the *Local Whisper dataset* option and providing the saved folder path.
+The script runs WhisperX to transcribe and segment the audio, then saves a dataset under `datasets/my_dataset`. A copy of the dataset is also written to `datasets/my_dataset/dataset.parquet` for easy sharing. You can load this dataset in the interactive training script by choosing the *Local Whisper dataset* option and providing the saved folder path.
