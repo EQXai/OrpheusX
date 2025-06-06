@@ -26,7 +26,7 @@ def prepare_dataset(audio_path: str, output_dir: str) -> None:
     audio_path = Path(audio_path).resolve()
     base = audio_path.stem
     temp_out = Path("whisperx_out")
-    segment_out = Path("recortes") / base
+    segment_out = Path("segments") / base
 
     # Run WhisperX transcription and segmentation
     json_path = whisper_run.run_whisperx(audio_path, temp_out)

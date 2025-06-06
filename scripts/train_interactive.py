@@ -54,12 +54,12 @@ if choice == "2":
         sys.exit(1)
     dataset_dirs = [d for d in os.listdir(dataset_root) if os.path.isdir(os.path.join(dataset_root, d))]
     if not dataset_dirs:
-        print(f"No se encontraron datasets en {dataset_root}.")
+        print(f"No datasets found in {dataset_root}.")
         sys.exit(1)
-    print("Seleccione el dataset:")
+    print("Select the dataset:")
     for idx, name in enumerate(dataset_dirs, 1):
         print(f"{idx}. {name}")
-    sub_choice = input("Elección [1]: ").strip() or "1"
+    sub_choice = input("Choice [1]: ").strip() or "1"
     if sub_choice.isdigit() and 1 <= int(sub_choice) <= len(dataset_dirs):
         selected = dataset_dirs[int(sub_choice) - 1]
     else:

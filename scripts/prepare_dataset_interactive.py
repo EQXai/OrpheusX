@@ -21,14 +21,14 @@ def main() -> None:
     audio_files = [f for f in os.listdir(audio_dir)
                    if f.lower().endswith((".mp3", ".wav"))]
     if not audio_files:
-        print("No se encontraron archivos de audio en 'source_audio'.")
+        print("No audio files found in 'source_audio'.")
         return
 
-    print("Seleccione el archivo de audio a procesar:")
+    print("Select the audio file to process:")
     for idx, name in enumerate(audio_files, 1):
         print(f"{idx}. {name}")
 
-    choice = input("Elecci\u00f3n [1]: ").strip() or "1"
+    choice = input("Choice [1]: ").strip() or "1"
     if not choice.isdigit() or not (1 <= int(choice) <= len(audio_files)):
         selected = audio_files[0]
     else:
