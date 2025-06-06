@@ -48,23 +48,24 @@ print("2. Local Whisper dataset")
 choice = input("Choice [1]: ").strip() or "1"
 dataset = None
 if choice == "2":
-    test_root = os.path.join(DATA_DIR, "test")
-    if not os.path.isdir(test_root):
-        print(f"Directory {test_root} does not exist.")
+    dataset_root = DATA_DIR
+    if not os.path.isdir(dataset_root):
+        print(f"Directory {dataset_root} does not exist.")
         sys.exit(1)
-    test_dirs = [d for d in os.listdir(test_root) if os.path.isdir(os.path.join(test_root, d))]
-    if not test_dirs:
-        print(f"No se encontraron datasets en {test_root}.")
+    dataset_dirs = [d for d in os.listdir(dataset_root) if os.path.isdir(os.path.join(dataset_root, d))]
+    if not dataset_dirs:
+        print(f"No se encontraron datasets en {dataset_root}.")
         sys.exit(1)
     print("Seleccione el dataset:")
-    for idx, name in enumerate(test_dirs, 1):
+    for idx, name in enumerate(dataset_dirs, 1):
         print(f"{idx}. {name}")
     sub_choice = input("Elección [1]: ").strip() or "1"
-    if sub_choice.isdigit() and 1 <= int(sub_choice) <= len(test_dirs):
-        selected = test_dirs[int(sub_choice) - 1]
+    if sub_choice.isdigit() and 1 <= int(sub_choice) <= len(dataset_dirs):
+        selected = dataset_dirs[int(sub_choice) - 1]
     else:
-        selected = test_dirs[0]
-    ds_path = os.path.join(test_root, selected)
+        selected = dataset_dirs[0]
+    ds_path = os.path.join(dataset_root, selected)
+
     dataset = load_from_disk(ds_path)
 else:
     dataset_link = input(f"Dataset to load [{default_dataset}]: ").strip() or default_dataset
