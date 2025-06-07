@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 """Interactive wrapper around ``infer.py``.
 
-This script prompts the user for a LoRA model to load and a list of
-prompts, then generates audio for each prompt, saving the results under
-the ``audio_output`` directory without overwriting existing files.
+This script prompts the user for one or more LoRA models and a list of
+prompts. Audio for each prompt is generated sequentially and written to
+``audio_output/<lora_name>/`` using incrementing file names so existing
+files are never overwritten.
 """
 import os
 import torch
@@ -27,13 +28,14 @@ def load_model(model_name, lora_path=None):
     FastLanguageModel.for_inference(model)
     return model, tokenizer
 
-def get_output_path(base_name: str = "audio", ext: str = ".wav") -> str:
-    """Return a unique file path under ``audio_output`` without overwriting."""
-    os.makedirs("audio_output", exist_ok=True)
+def get_output_path(lora_name: str, ext: str = ".wav") -> str:
+    """Return a unique file path for a LoRA under ``audio_output``."""
+    base_dir = os.path.join("audio_output", lora_name)
+    os.makedirs(base_dir, exist_ok=True)
+
     idx = 1
     while True:
-        suffix = f"_{idx}" if idx > 1 else ""
-        path = os.path.join("audio_output", f"{base_name}{suffix}{ext}")
+        path = os.path.join(base_dir, f"{lora_name}_{idx}{ext}")
         if not os.path.exists(path):
             return path
         idx += 1
@@ -138,7 +140,7 @@ def main():
                 return audio_hat
             samples = [redistribute_codes(c) for c in code_lists]
             for sample in samples:
-                path = get_output_path()
+                path = get_output_path(lora_choice or "base_model")
                 audio_2d = sample.squeeze(0)
                 torchaudio.save(path, audio_2d.detach().cpu(), 24000)
                 print(f'Audio written to {path}')
