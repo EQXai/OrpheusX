@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import argparse
 import os
+import json
 import torch
 import torchaudio
 from unsloth import FastLanguageModel
@@ -32,8 +33,47 @@ def main():
     snac_model = SNAC.from_pretrained('hubertsiuzdak/snac_24khz', cache_dir=CACHE_DIR)
     snac_model = snac_model.to('cpu')
 
+    print(
+        "You can use these tokens for preconfigured expressions: "
+        "<laugh>, <chuckle>, <sigh>, <cough>, <sniffle>, <groan>, <yawn>, <gasp>"
+    )
+
+    prompt_root = "prompt_list"
+    prompt_files = []
+    if os.path.isdir(prompt_root):
+        prompt_files = [f for f in os.listdir(prompt_root) if f.endswith(".json")]
+
+    prompt_list = None
+    if prompt_files:
+        print("Available prompt lists:")
+        loaded_lists = []
+        for idx, fname in enumerate(prompt_files, 1):
+            path = os.path.join(prompt_root, fname)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                data = []
+            if not isinstance(data, list):
+                data = []
+            loaded_lists.append(data)
+            print(f"{idx}. {fname} ({len(data)} prompts)")
+        choice = input("Select list by number or 0 to skip [0]: ").strip() or "0"
+        if choice.isdigit() and 1 <= int(choice) <= len(loaded_lists):
+            idx = int(choice) - 1
+            prompt_list = loaded_lists[idx]
+            print("Preview of selected list:")
+            for p in prompt_list[:3]:
+                print(f"- {p}")
+
     while True:
-        text = input('Enter text (or blank to quit): ').strip()
+        if prompt_list is not None:
+            if not prompt_list:
+                break
+            text = prompt_list.pop(0)
+            print(f"Prompt: {text}")
+        else:
+            text = input('Enter text (or blank to quit): ').strip()
         if not text:
             break
         input_ids = tokenizer(text, return_tensors='pt').input_ids
