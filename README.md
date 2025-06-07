@@ -1,60 +1,64 @@
-# OrpheusX TTS Scripts
+# 🚀 OrpheusX – Speech-to-Speech Fine-Tuning Toolkit
 
-## Installation
+OrpheusX is a powerful tool for creating, training, and running custom speech-to-speech (STS) or text-to-speech (TTS) models. It includes an interactive CLI to guide you through every step.
 
-Run the installation script to fetch all dependencies. It creates a virtual environment named `venv` in the repository root and installs PyTorch 2.6.0 built for CUDA 12.4 automatically. The script also warns if your CUDA runtime is newer.  
-It installs WhisperX and its requirements (`librosa`, `soundfile` and the `ffmpeg` binary) so you can generate datasets from audio files directly.
+---
+
+## 🛠️ System Requirements
+
+- **Python** ≥ 3.10    
+- **CUDA Toolkit**: **version 12.4 only**  
+  ⚠️ *Using a newer CUDA version may cause installation issues.*
+
+---
+
+## 📦 Installation
+
+Clone the repository:
 
 ```bash
-bash scripts/install.sh
+git clone https://github.com/EQXai/OrpheusX.git
+cd OrpheusX
 ```
 
-After installation activate the environment:
+Installation script:
+
+```bash
+python scripts/install.sh
+```
+
+Activate venv::
 
 ```bash
 source venv/bin/activate
 ```
 
-**Important:** OrpheusX only supports CUDA 12.4 or lower. Using a newer CUDA runtime may cause installation failures.
+Everything else (installation, dataset creation, training, inference) is handled interactively through the CLI.
 
-## Verify your environment
-
-Use the environment check script to confirm that all required packages are available and that CUDA is detected.
+To start:
 
 ```bash
-python scripts/check_env.py
+python scripts/orpheus_cli.py
 ```
 
-## Training
+# 📁 Where to place the audio dataset:
 
-Execute the training script to download the dataset, preprocess it and start training. Models and datasets are cached under `models/` and `datasets/` in the repository root.
+##  Audio Organization
 
-```bash
-python scripts/train_interactive.py
-```
+- Input audio files should be placed in the folder: `source_audio/`
 
-Training settings mirror those found in the original notebook (60 steps, LoRA adapters etc.). The resulting LoRA weights will be written under `lora_models/<name>/lora_model/`.
+#  Output Directory:
 
-## Inference
+- The output of the processed audio files can be found in: `scripts/audio_output/`
+  
+---
 
-Run interactive inference to generate audio from custom text. 
+## 🧩 Features
 
-```bash
-python scripts/infer_interactive.py
-```
+- Install dependencies
+- Create WhisperX datasets
+- Train LoRA models
+- Run inference
 
-The script prompts for text and writes `output.wav` containing the generated audio.
+All features are available via an interactive command-line menu.
 
-## Interactive scripts
-
-For convenience, `train_interactive.py` and `infer_interactive.py` provide an interactive workflow. They ask for dataset links, a name for each LoRA and inference prompts on the command line. Generated audio is saved under `audio_output/` without overwriting existing files.
-
-## Preparing datasets with Whisper
-
-The `Whisper` directory contains tools to convert long audio recordings into a Hugging Face style dataset. Use `prepare_dataset.py` to create a local dataset from an audio file:
-
-```bash
-python scripts/prepare_dataset.py path/to/audio.mp3 datasets/my_dataset
-```
-
-The script runs WhisperX to transcribe and segment the audio, then saves a dataset under `datasets/my_dataset`. A copy of the dataset is also written to `datasets/my_dataset/dataset.parquet`. This Parquet file embeds the raw audio so it can be shared or loaded directly without the accompanying `.wav` files. You can load this dataset in the interactive training script by choosing the *Local Whisper dataset* option and providing the saved folder path.
