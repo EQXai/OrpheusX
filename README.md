@@ -21,6 +21,18 @@ git clone https://github.com/EQXai/OrpheusX.git
 cd OrpheusX
 ```
 
+Installation script:
+
+```bash
+python scripts/install.sh
+```
+
+Activate venv::
+
+```bash
+source venv/bin/activate
+```
+
 Everything else (installation, dataset creation, training, inference) is handled interactively through the CLI.
 
 To start:
