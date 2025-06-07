@@ -361,8 +361,19 @@ dataset_choices = list_datasets()
 lora_choices = list_loras()
 prompt_files = list_prompt_files()
 
+
+def refresh_lists() -> tuple[gr.Update, gr.Update, gr.Update]:
+    """Reload datasets, LoRAs and prompt lists from disk."""
+    return (
+        gr.update(choices=list_datasets()),
+        gr.update(choices=["<base>"] + list_loras()),
+        gr.update(choices=list_prompt_files()),
+    )
+
 with gr.Blocks() as demo:
     gr.Markdown("# OrpheusX Gradio Interface")
+
+    refresh_btn = gr.Button("Refresh directories")
 
     with gr.Tab("Prepare Dataset"):
         audio_input = gr.Audio(type="filepath")
@@ -420,6 +431,8 @@ with gr.Blocks() as demo:
             [mode, num_prompts] + prompt_boxes + [prompt_list_dd, lora_used],
             gallery,
         )
+
+    refresh_btn.click(refresh_lists, None, [local_ds, lora_used, prompt_list_dd])
 
 
 if __name__ == "__main__":
