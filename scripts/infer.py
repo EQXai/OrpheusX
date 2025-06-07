@@ -32,6 +32,11 @@ def main():
     snac_model = SNAC.from_pretrained('hubertsiuzdak/snac_24khz', cache_dir=CACHE_DIR)
     snac_model = snac_model.to('cpu')
 
+    print(
+        "You can use these tokens for preconfigured expressions: "
+        "<laugh>, <chuckle>, <sigh>, <cough>, <sniffle>, <groan>, <yawn>, <gasp>"
+    )
+
     while True:
         text = input('Enter text (or blank to quit): ').strip()
         if not text:

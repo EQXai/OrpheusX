@@ -72,6 +72,10 @@ def main():
 
     num_gens = input("How many prompts to generate [1]: ").strip()
     num_gens = int(num_gens or "1")
+    print(
+        "You can use these tokens for preconfigured expressions: "
+        "<laugh>, <chuckle>, <sigh>, <cough>, <sniffle>, <groan>, <yawn>, <gasp>"
+    )
     prompts = []
     for i in range(num_gens):
         p = input(f"Prompt {i+1}: ").strip()
