@@ -332,4 +332,11 @@ with gr.Blocks() as demo:
         infer_btn.click(run_infer, [prompt, lora_used], audio_out)
 
 if __name__ == "__main__":
-    demo.launch()
+    port_input = input("¿En qué puerto desea abrir Gradio? (default 7860): ")
+    try:
+        port = int(port_input) if port_input.strip() else 7860
+    except ValueError:
+        print("Valor inválido, usando el puerto 7860")
+        port = 7860
+    demo.launch(server_port=port)
+

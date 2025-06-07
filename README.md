@@ -72,5 +72,6 @@ If you prefer a simple web UI instead of the CLI, run:
 python gradio_app.py
 ```
 
+The script will ask which port you want to use before launching.
 This exposes dataset preparation, training and inference in your browser.
 
