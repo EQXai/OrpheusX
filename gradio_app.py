@@ -235,7 +235,6 @@ def train_loras(hf_links: str, local_datasets: list[str]) -> str:
             msgs.append(f"{name}: failed ({e})")
     return "\n".join(msgs)
 
-
 # ---- Inference ----
 from peft import PeftModel
 
@@ -420,6 +419,7 @@ with gr.Blocks() as demo:
             [mode, num_prompts] + prompt_boxes + [prompt_list_dd, lora_used],
             gallery,
         )
+
 
 if __name__ == "__main__":
     port_input = input("¿En qué puerto desea abrir Gradio? (default 7860): ")
