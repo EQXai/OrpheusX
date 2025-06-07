@@ -65,17 +65,17 @@ def prepare_datasets_ui(upload_file: str, name: str, existing: list[str] | None)
 
     msgs = []
     total = len(tasks)
-    with gr.Progress() as progress:
-        for idx, (audio_path, ds_name) in enumerate(tasks, start=1):
-            progress((idx - 1) / total, desc=f"Preparing {ds_name}...")
-            out_dir = DATASETS_DIR / ds_name
-            out_dir.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                prepare_dataset(audio_path, str(out_dir))
-                msgs.append(f"{ds_name}: success")
-            except Exception as e:  # pragma: no cover - best effort
-                msgs.append(f"{ds_name}: failed ({e})")
-            progress(idx / total)
+    progress = gr.Progress()
+    for idx, (audio_path, ds_name) in enumerate(tasks, start=1):
+        progress((idx - 1) / total, desc=f"Preparing {ds_name}...")
+        out_dir = DATASETS_DIR / ds_name
+        out_dir.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            prepare_dataset(audio_path, str(out_dir))
+            msgs.append(f"{ds_name}: success")
+        except Exception as e:  # pragma: no cover - best effort
+            msgs.append(f"{ds_name}: failed ({e})")
+        progress(idx / total)
     return "\n".join(msgs)
 
 
@@ -257,15 +257,15 @@ def train_loras(hf_links: str, local_datasets: list[str]) -> str:
         return "No datasets selected."
     msgs = []
     total = len(dataset_info)
-    with gr.Progress() as progress:
-        for idx, (src, name, is_local) in enumerate(dataset_info, start=1):
-            progress((idx - 1) / total, desc=f"Training {name}...")
-            try:
-                msg = train_lora_single(src, name, is_local)
-                msgs.append(f"{name}: success")
-            except Exception as e:  # pragma: no cover - best effort
-                msgs.append(f"{name}: failed ({e})")
-        progress(1)
+    progress = gr.Progress()
+    for idx, (src, name, is_local) in enumerate(dataset_info, start=1):
+        progress((idx - 1) / total, desc=f"Training {name}...")
+        try:
+            msg = train_lora_single(src, name, is_local)
+            msgs.append(f"{name}: success")
+        except Exception as e:  # pragma: no cover - best effort
+            msgs.append(f"{name}: failed ({e})")
+    progress(1)
     return "\n".join(msgs)
 
 # ---- Inference ----
@@ -430,23 +430,23 @@ def generate_batch(
     last_path = ""
     total = len(prompts) * len(loras)
     step = 0
-    with gr.Progress() as progress:
-        for lora in loras:
-            for text in prompts:
-                progress(step / total, desc=f"Generating {lora or 'base'}...")
-                path = generate_audio(
-                    text,
-                    None if lora == "<base>" else lora,
-                    temperature,
-                    top_p,
-                    repetition_penalty,
-                    max_new_tokens,
-                )
-                caption = f"{lora or 'base'}: {text}"[:60]
-                results.append((path, caption))
-                last_path = path
-                step += 1
-        progress(1)
+    progress = gr.Progress()
+    for lora in loras:
+        for text in prompts:
+            progress(step / total, desc=f"Generating {lora or 'base'}...")
+            path = generate_audio(
+                text,
+                None if lora == "<base>" else lora,
+                temperature,
+                top_p,
+                repetition_penalty,
+                max_new_tokens,
+            )
+            caption = f"{lora or 'base'}: {text}"[:60]
+            results.append((path, caption))
+            last_path = path
+            step += 1
+    progress(1)
     return results, last_path
 
 
