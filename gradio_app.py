@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import json
 import gradio as gr
 
 # The prepare_dataset helper can be imported safely
@@ -17,6 +18,26 @@ from scripts.prepare_dataset import prepare_dataset
 REPO_ROOT = Path(__file__).resolve().parent
 DATASETS_DIR = REPO_ROOT / "datasets"
 LORA_DIR = REPO_ROOT / "lora_models"
+PROMPT_LIST_DIR = REPO_ROOT / "prompt_list"
+MAX_PROMPTS = 5
+
+
+def list_datasets() -> list[str]:
+    if not DATASETS_DIR.is_dir():
+        return []
+    return sorted([d.name for d in DATASETS_DIR.iterdir() if d.is_dir()])
+
+
+def list_loras() -> list[str]:
+    if not LORA_DIR.is_dir():
+        return []
+    return sorted([d.name for d in LORA_DIR.iterdir() if d.is_dir()])
+
+
+def list_prompt_files() -> list[str]:
+    if not PROMPT_LIST_DIR.is_dir():
+        return []
+    return sorted([f.name for f in PROMPT_LIST_DIR.glob("*.json")])
 
 
 def prepare_dataset_ui(audio_file: str, name: str) -> str:
@@ -42,8 +63,8 @@ MODEL_NAME = os.environ.get("MODEL_NAME", "unsloth/orpheus-3b-0.1-ft")
 CACHE_DIR = REPO_ROOT / "models"
 
 
-def train_lora(dataset_source: str, lora_name: str, is_local: bool) -> str:
-    """Train a LoRA on a dataset."""
+def train_lora_single(dataset_source: str, lora_name: str, is_local: bool) -> str:
+    """Train a single LoRA on a dataset."""
     if is_local:
         dataset = load_from_disk(dataset_source)
     else:
@@ -194,6 +215,26 @@ def train_lora(dataset_source: str, lora_name: str, is_local: bool) -> str:
     return f"LoRA saved under {save_dir.resolve()}"
 
 
+def train_loras(hf_links: str, local_datasets: list[str]) -> str:
+    """Train one or more LoRAs based on the provided sources."""
+    dataset_info: list[tuple[str, str, bool]] = []
+    links = [l.strip() for l in hf_links.splitlines() if l.strip()]
+    for link in links:
+        name = link.split("/")[-1]
+        dataset_info.append((link, name, False))
+    for ds in local_datasets:
+        dataset_info.append((str(DATASETS_DIR / ds), ds, True))
+    if not dataset_info:
+        return "No datasets selected."
+    msgs = []
+    for src, name, is_local in dataset_info:
+        try:
+            msg = train_lora_single(src, name, is_local)
+            msgs.append(f"{name}: success")
+        except Exception as e:  # pragma: no cover - best effort
+            msgs.append(f"{name}: failed ({e})")
+    return "\n".join(msgs)
+
 # ---- Inference ----
 from peft import PeftModel
 
@@ -300,7 +341,25 @@ def generate_audio(text: str, lora_name: str | None) -> str:
     return str(path)
 
 
+def generate_batch(prompts: list[str], loras: list[str]) -> list[tuple[str, str]]:
+    """Generate audio for multiple prompts/LORAs."""
+    if not prompts:
+        return []
+    loras = loras or [None]
+    results = []
+    for lora in loras:
+        for text in prompts:
+            path = generate_audio(text, None if lora == "<base>" else lora)
+            caption = f"{lora or 'base'}: {text}"[:60]
+            results.append((path, caption))
+    return results
+
+
 # ---- Gradio Interface ----
+dataset_choices = list_datasets()
+lora_choices = list_loras()
+prompt_files = list_prompt_files()
+
 with gr.Blocks() as demo:
     gr.Markdown("# OrpheusX Gradio Interface")
 
@@ -312,24 +371,55 @@ with gr.Blocks() as demo:
         prepare_btn.click(prepare_dataset_ui, [audio_input, dataset_name], prepare_output)
 
     with gr.Tab("Train LoRA"):
-        dataset_source = gr.Textbox(label="Dataset Path or HF link")
-        lora_name = gr.Textbox(label="LoRA name")
-        is_local = gr.Checkbox(label="Dataset is local", value=True)
+        hf_input = gr.Textbox(label="HF dataset link (one per line)")
+        local_ds = gr.Dropdown(choices=dataset_choices, multiselect=True, label="Local dataset(s)")
         train_btn = gr.Button("Train")
         train_output = gr.Textbox()
-        train_btn.click(train_lora, [dataset_source, lora_name, is_local], train_output)
+        train_btn.click(train_loras, [hf_input, local_ds], train_output)
 
     with gr.Tab("Inference"):
-        prompt = gr.Textbox(label="Prompt")
-        lora_used = gr.Textbox(label="LoRA name (blank for base model)")
+        mode = gr.Radio(["Manual", "Prompt List"], value="Manual", label="Prompt source")
+        num_prompts = gr.Number(value=1, precision=0, label="Number of prompts")
+        prompt_boxes = [gr.Textbox(label=f"Prompt {i+1}", visible=(i == 0)) for i in range(MAX_PROMPTS)]
+        prompt_list_dd = gr.Dropdown(choices=prompt_files, label="Prompt list", visible=False)
+        lora_used = gr.Dropdown(choices=["<base>"] + lora_choices, multiselect=True, label="LoRA(s)")
         infer_btn = gr.Button("Generate")
-        audio_out = gr.Audio()
+        gallery = gr.Gallery(label="Outputs")
 
-        def run_infer(text, lora):
-            path = generate_audio(text, lora or None)
-            return path
+        def _update(mode_val, n_val):
+            n = int(n_val or 1)
+            updates = []
+            for i in range(MAX_PROMPTS):
+                updates.append(gr.update(visible=mode_val == "Manual" and i < n))
+            updates.append(gr.update(visible=mode_val == "Prompt List"))
+            return updates
 
-        infer_btn.click(run_infer, [prompt, lora_used], audio_out)
+        mode.change(_update, [mode, num_prompts], prompt_boxes + [prompt_list_dd])
+        num_prompts.change(_update, [mode, num_prompts], prompt_boxes + [prompt_list_dd])
+
+        def run_infer(mode_val, n_val, *args):
+            prompts = []
+            if mode_val == "Prompt List" and args[MAX_PROMPTS]:
+                path = PROMPT_LIST_DIR / args[MAX_PROMPTS]
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    if isinstance(data, list):
+                        prompts = [str(x) for x in data]
+                except Exception:
+                    prompts = []
+            else:
+                n = int(n_val or 1)
+                prompts = [p for p in args[:MAX_PROMPTS][:n] if p]
+            loras = args[MAX_PROMPTS + 1] if len(args) > MAX_PROMPTS + 1 else []
+            return generate_batch(prompts, loras)
+
+        infer_btn.click(
+            run_infer,
+            [mode, num_prompts] + prompt_boxes + [prompt_list_dd, lora_used],
+            gallery,
+        )
+
 
 if __name__ == "__main__":
     port_input = input("¿En qué puerto desea abrir Gradio? (default 7860): ")
@@ -339,4 +429,3 @@ if __name__ == "__main__":
         print("Valor inválido, usando el puerto 7860")
         port = 7860
     demo.launch(server_port=port)
-

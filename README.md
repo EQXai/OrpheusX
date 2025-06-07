@@ -71,7 +71,8 @@ If you prefer a simple web UI instead of the CLI, run:
 ```bash
 python gradio_app.py
 ```
-
 The script will ask which port you want to use before launching.
-This exposes dataset preparation, training and inference in your browser.
+The web UI lets you prepare datasets, train LoRAs and run inference.
+Training and inference tabs include dropdowns listing local datasets or
+available LoRA models and can also load prompt lists from `prompt_list/`.
 
