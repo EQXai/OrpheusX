@@ -78,6 +78,16 @@ def main():
 
     prompts = []
     if prompt_files:
+        mode = (
+            input(
+                "Enter '1' to type prompts manually or '2' to load a prompt list [1]: "
+            ).strip()
+            or "1"
+        )
+    else:
+        mode = "1"
+
+    if mode == "2" and prompt_files:
         print("Available prompt lists:")
         loaded_lists = []
         for idx, fname in enumerate(prompt_files, 1):
