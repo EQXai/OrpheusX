@@ -362,7 +362,8 @@ lora_choices = list_loras()
 prompt_files = list_prompt_files()
 
 
-def refresh_lists() -> tuple[gr.Update, gr.Update, gr.Update]:
+def refresh_lists() -> tuple:
+
     """Reload datasets, LoRAs and prompt lists from disk."""
     return (
         gr.update(choices=list_datasets()),
