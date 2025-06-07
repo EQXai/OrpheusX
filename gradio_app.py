@@ -20,6 +20,7 @@ DATASETS_DIR = REPO_ROOT / "datasets"
 # Match the CLI scripts which store LoRAs under ``scripts/lora_models``
 LORA_DIR = REPO_ROOT / "scripts" / "lora_models"
 PROMPT_LIST_DIR = REPO_ROOT / "prompt_list"
+SOURCE_AUDIO_DIR = REPO_ROOT / "source_audio"
 MAX_PROMPTS = 5
 
 
@@ -41,17 +42,41 @@ def list_prompt_files() -> list[str]:
     return sorted([f.name for f in PROMPT_LIST_DIR.glob("*.json")])
 
 
-def prepare_dataset_ui(audio_file: str, name: str) -> str:
-    """Run dataset preparation and return the dataset path."""
-    if not audio_file or not name:
-        return "Please provide an audio file and dataset name."
-    out_dir = DATASETS_DIR / name
-    out_dir.parent.mkdir(parents=True, exist_ok=True)
+def list_source_audio() -> list[str]:
+    if not SOURCE_AUDIO_DIR.is_dir():
+        return []
+    return sorted(
+        [f.name for f in SOURCE_AUDIO_DIR.iterdir() if f.suffix.lower() in (".wav", ".mp3")]
+    )
+
+
+def prepare_datasets_ui(upload_file: str, name: str, existing: list[str] | None) -> str:
+    """Prepare one or more datasets from uploaded or existing audio files."""
+    tasks: list[tuple[str, str]] = []
+    if upload_file:
+        if not name:
+            return "Please provide a dataset name for the uploaded audio."
+        tasks.append((upload_file, name))
+    for fname in existing or []:
+        audio_path = SOURCE_AUDIO_DIR / fname
+        tasks.append((str(audio_path), Path(fname).stem))
+    if not tasks:
+        return "No audio selected."
+
+    msgs = []
+    total = len(tasks)
     with gr.Progress() as progress:
-        progress(0, desc="Preparing dataset...")
-        prepare_dataset(audio_file, str(out_dir))
-        progress(1)
-    return f"Dataset saved to {out_dir.resolve()}"
+        for idx, (audio_path, ds_name) in enumerate(tasks, start=1):
+            progress((idx - 1) / total, desc=f"Preparing {ds_name}...")
+            out_dir = DATASETS_DIR / ds_name
+            out_dir.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                prepare_dataset(audio_path, str(out_dir))
+                msgs.append(f"{ds_name}: success")
+            except Exception as e:  # pragma: no cover - best effort
+                msgs.append(f"{ds_name}: failed ({e})")
+            progress(idx / total)
+    return "\n".join(msgs)
 
 
 # ---- Training ----
@@ -246,8 +271,28 @@ def train_loras(hf_links: str, local_datasets: list[str]) -> str:
 # ---- Inference ----
 from peft import PeftModel
 
+# Cache for loaded models to avoid reloading on every prompt
+_LOADED_MODEL_NAME: str | None = None
+_LOADED_LORA_PATH: str | None = None
+_LOADED_MODEL = None
+_LOADED_TOKENIZER = None
+_SNAC_MODEL = None
+
 
 def load_model(base_model: str, lora_path: str | None):
+    """Load a model/Lora pair reusing any already loaded model."""
+    global _LOADED_MODEL_NAME, _LOADED_LORA_PATH, _LOADED_MODEL, _LOADED_TOKENIZER
+    if (
+        _LOADED_MODEL is not None
+        and _LOADED_MODEL_NAME == base_model
+        and _LOADED_LORA_PATH == lora_path
+    ):
+        return _LOADED_MODEL, _LOADED_TOKENIZER
+
+    if _LOADED_MODEL is not None:
+        del _LOADED_MODEL
+        torch.cuda.empty_cache()
+
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=base_model,
         max_seq_length=2048,
@@ -258,6 +303,11 @@ def load_model(base_model: str, lora_path: str | None):
     if lora_path and os.path.isdir(lora_path):
         model = PeftModel.from_pretrained(model, lora_path)
     FastLanguageModel.for_inference(model)
+
+    _LOADED_MODEL_NAME = base_model
+    _LOADED_LORA_PATH = lora_path
+    _LOADED_MODEL = model
+    _LOADED_TOKENIZER = tokenizer
     return model, tokenizer
 
 
@@ -270,6 +320,15 @@ def get_output_path(lora_name: str, ext: str = ".wav") -> Path:
         if not path.exists():
             return path
         idx += 1
+
+
+def get_snac_model():
+    """Load SNAC model once and cache it."""
+    global _SNAC_MODEL
+    if _SNAC_MODEL is None:
+        _SNAC_MODEL = SNAC.from_pretrained("hubertsiuzdak/snac_24khz", cache_dir=str(CACHE_DIR))
+        _SNAC_MODEL = _SNAC_MODEL.to("cpu")
+    return _SNAC_MODEL
 
 
 def generate_audio(
@@ -286,8 +345,7 @@ def generate_audio(
         lora_path = LORA_DIR / lora_name / "lora_model"
     model, tokenizer = load_model(model_name, str(lora_path) if lora_path else None)
 
-    snac_model = SNAC.from_pretrained('hubertsiuzdak/snac_24khz', cache_dir=str(CACHE_DIR))
-    snac_model = snac_model.to('cpu')
+    snac_model = get_snac_model()
 
     input_ids = tokenizer(text, return_tensors='pt').input_ids
     start_token = torch.tensor([[128259]], dtype=torch.int64)
@@ -405,6 +463,7 @@ def refresh_lists() -> tuple:
         gr.update(choices=list_datasets()),
         gr.update(choices=["<base>"] + list_loras()),
         gr.update(choices=list_prompt_files()),
+        gr.update(choices=list_source_audio()),
     )
 
 with gr.Blocks() as demo:
@@ -413,11 +472,16 @@ with gr.Blocks() as demo:
     refresh_btn = gr.Button("Refresh directories")
 
     with gr.Tab("Prepare Dataset"):
-        audio_input = gr.Audio(type="filepath")
-        dataset_name = gr.Textbox(label="Dataset Name")
+        audio_input = gr.Audio(type="filepath", label="Upload audio")
+        local_audio = gr.Dropdown(choices=list_source_audio(), multiselect=True, label="Existing audio file(s)")
+        dataset_name = gr.Textbox(label="Dataset Name (for upload)")
         prepare_btn = gr.Button("Prepare")
         prepare_output = gr.Textbox()
-        prepare_btn.click(prepare_dataset_ui, [audio_input, dataset_name], prepare_output)
+        prepare_btn.click(
+            prepare_datasets_ui,
+            [audio_input, dataset_name, local_audio],
+            prepare_output,
+        )
 
     with gr.Tab("Train LoRA"):
         hf_input = gr.Textbox(label="HF dataset link (one per line)")
@@ -499,7 +563,7 @@ with gr.Blocks() as demo:
 
         clear_btn.click(lambda: ([], None), None, [gallery, last_audio], queue=False)
 
-    refresh_btn.click(refresh_lists, None, [local_ds, lora_used, prompt_list_dd])
+    refresh_btn.click(refresh_lists, None, [local_ds, lora_used, prompt_list_dd, local_audio])
 
 
 if __name__ == "__main__":
