@@ -7,6 +7,7 @@ prompts. Audio for each prompt is generated sequentially and written to
 files are never overwritten.
 """
 import os
+import json
 import torch
 import torchaudio
 from unsloth import FastLanguageModel
@@ -70,12 +71,55 @@ def main():
     snac_model = SNAC.from_pretrained('hubertsiuzdak/snac_24khz', cache_dir=CACHE_DIR)
     snac_model = snac_model.to('cpu')
 
-    num_gens = input("How many prompts to generate [1]: ").strip()
-    num_gens = int(num_gens or "1")
+    prompt_root = "prompt_list"
+    prompt_files = []
+    if os.path.isdir(prompt_root):
+        prompt_files = [f for f in os.listdir(prompt_root) if f.endswith(".json")]
+
     prompts = []
-    for i in range(num_gens):
-        p = input(f"Prompt {i+1}: ").strip()
-        prompts.append(p)
+    if prompt_files:
+        mode = (
+            input(
+                "Enter '1' to type prompts manually or '2' to load a prompt list [1]: "
+            ).strip()
+            or "1"
+        )
+    else:
+        mode = "1"
+
+    if mode == "2" and prompt_files:
+        print("Available prompt lists:")
+        loaded_lists = []
+        for idx, fname in enumerate(prompt_files, 1):
+            path = os.path.join(prompt_root, fname)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                data = []
+            if not isinstance(data, list):
+                data = []
+            loaded_lists.append(data)
+            print(f"{idx}. {fname} ({len(data)} prompts)")
+        choice = input("Select list by number [1]: ").strip() or "1"
+        if choice.isdigit() and 1 <= int(choice) <= len(loaded_lists):
+            idx = int(choice) - 1
+        else:
+            idx = 0
+        prompts = loaded_lists[idx]
+        print("Preview of selected list:")
+        for p in prompts[:3]:
+            print(f"- {p}")
+    else:
+        num_gens = input("How many prompts to generate [1]: ").strip()
+        num_gens = int(num_gens or "1")
+        print(
+            "You can use these tokens for preconfigured expressions: "
+            "<laugh>, <chuckle>, <sigh>, <cough>, <sniffle>, <groan>, <yawn>, <gasp>"
+        )
+        for i in range(num_gens):
+            p = input(f"Prompt {i+1}: ").strip()
+            prompts.append(p)
 
     for lora_choice in selected_loras:
         lora_path = os.path.join(lora_root, lora_choice, "lora_model") if lora_choice else None
