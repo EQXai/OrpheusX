@@ -25,9 +25,19 @@ Use the environment check script to confirm that all required packages are avail
 python scripts/check_env.py
 ```
 
+## CLI menu
+
+You can manage all tasks using the interactive command line menu:
+
+```bash
+python scripts/orpheus_cli.py
+```
+
+The CLI lets you run the installer, create WhisperX datasets, train new LoRA models and launch inference. Each option can loop over multiple datasets or models if desired.
+
 ## Training
 
-Execute the training script to download the dataset, preprocess it and start training. Models and datasets are cached under `models/` and `datasets/` in the repository root.
+Execute the training script to download the dataset, preprocess it and start training. Models and datasets are cached under `models/` and `datasets/` in the repository root. The script lets you choose one or more datasets and trains a separate LoRA adapter for each one.
 
 ```bash
 python scripts/train_interactive.py
@@ -37,17 +47,17 @@ Training settings mirror those found in the original notebook (60 steps, LoRA ad
 
 ## Inference
 
-Run interactive inference to generate audio from custom text. 
+Run interactive inference to generate audio from custom text.
 
 ```bash
 python scripts/infer_interactive.py
 ```
 
-The script prompts for text and writes `output.wav` containing the generated audio.
+The script prompts for text and saves the resulting audio under `audio_output/<lora_name>/` using incrementing file names so previous results are kept.
 
 ## Interactive scripts
 
-For convenience, `train_interactive.py` and `infer_interactive.py` provide an interactive workflow. They ask for dataset links, a name for each LoRA and inference prompts on the command line. Generated audio is saved under `audio_output/` without overwriting existing files.
+For convenience, `train_interactive.py` and `infer_interactive.py` provide an interactive workflow. Both support selecting multiple datasets or LoRA models which are processed sequentially. Generated audio is saved under `audio_output/<lora_name>` without overwriting existing files. To create datasets interactively you can use `prepare_dataset_interactive.py`, which lists audio files from the `source_audio` folder and builds a WhisperX dataset for each selection.
 
 ## Preparing datasets with Whisper
 
