@@ -41,6 +41,16 @@ To start:
 python scripts/orpheus_cli.py
 ```
 
+# 📁 Where to place the audio dataset:
+
+##  Audio Organization
+
+- Input audio files should be placed in the folder: `source_audio/`
+
+#  Output Directory:
+
+- The output of the processed audio files can be found in: `scripts/audio_output/`
+  
 ---
 
 ## 🧩 Features
