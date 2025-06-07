@@ -64,7 +64,7 @@ All features are available via an interactive command-line menu.
 
 ---
 
-## 🌐 Gradio Interface
+## 🌐 Gradio Interface (UNDER DEVELOPMENT)
 
 If you prefer a simple web UI instead of the CLI, run:
 
