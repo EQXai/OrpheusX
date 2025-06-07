@@ -38,7 +38,9 @@ def main():
         "<laugh>, <chuckle>, <sigh>, <cough>, <sniffle>, <groan>, <yawn>, <gasp>"
     )
 
-    prompt_root = "prompt_list"
+    script_dir = os.path.dirname(__file__)
+    prompt_root = os.path.join(script_dir, "..", "prompt_list")
+
     prompt_files = []
     if os.path.isdir(prompt_root):
         prompt_files = [f for f in os.listdir(prompt_root) if f.endswith(".json")]

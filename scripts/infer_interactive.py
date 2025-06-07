@@ -71,7 +71,9 @@ def main():
     snac_model = SNAC.from_pretrained('hubertsiuzdak/snac_24khz', cache_dir=CACHE_DIR)
     snac_model = snac_model.to('cpu')
 
-    prompt_root = "prompt_list"
+    script_dir = os.path.dirname(__file__)
+    prompt_root = os.path.join(script_dir, "..", "prompt_list")
+
     prompt_files = []
     if os.path.isdir(prompt_root):
         prompt_files = [f for f in os.listdir(prompt_root) if f.endswith(".json")]
