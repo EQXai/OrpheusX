@@ -47,7 +47,10 @@ def prepare_dataset_ui(audio_file: str, name: str) -> str:
         return "Please provide an audio file and dataset name."
     out_dir = DATASETS_DIR / name
     out_dir.parent.mkdir(parents=True, exist_ok=True)
-    prepare_dataset(audio_file, str(out_dir))
+    with gr.Progress() as progress:
+        progress(0, desc="Preparing dataset...")
+        prepare_dataset(audio_file, str(out_dir))
+        progress(1)
     return f"Dataset saved to {out_dir.resolve()}"
 
 
@@ -228,12 +231,16 @@ def train_loras(hf_links: str, local_datasets: list[str]) -> str:
     if not dataset_info:
         return "No datasets selected."
     msgs = []
-    for src, name, is_local in dataset_info:
-        try:
-            msg = train_lora_single(src, name, is_local)
-            msgs.append(f"{name}: success")
-        except Exception as e:  # pragma: no cover - best effort
-            msgs.append(f"{name}: failed ({e})")
+    total = len(dataset_info)
+    with gr.Progress() as progress:
+        for idx, (src, name, is_local) in enumerate(dataset_info, start=1):
+            progress((idx - 1) / total, desc=f"Training {name}...")
+            try:
+                msg = train_lora_single(src, name, is_local)
+                msgs.append(f"{name}: success")
+            except Exception as e:  # pragma: no cover - best effort
+                msgs.append(f"{name}: failed ({e})")
+        progress(1)
     return "\n".join(msgs)
 
 # ---- Inference ----
@@ -265,7 +272,14 @@ def get_output_path(lora_name: str, ext: str = ".wav") -> Path:
         idx += 1
 
 
-def generate_audio(text: str, lora_name: str | None) -> str:
+def generate_audio(
+    text: str,
+    lora_name: str | None,
+    temperature: float = 0.6,
+    top_p: float = 0.95,
+    repetition_penalty: float = 1.1,
+    max_new_tokens: int = 1200,
+) -> str:
     model_name = MODEL_NAME
     lora_path = None
     if lora_name:
@@ -285,11 +299,11 @@ def generate_audio(text: str, lora_name: str | None) -> str:
     generated = model.generate(
         input_ids=input_ids_cuda,
         attention_mask=attn_cuda,
-        max_new_tokens=1200,
+        max_new_tokens=max_new_tokens,
         do_sample=True,
-        temperature=0.6,
-        top_p=0.95,
-        repetition_penalty=1.1,
+        temperature=temperature,
+        top_p=top_p,
+        repetition_penalty=repetition_penalty,
         num_return_sequences=1,
         eos_token_id=128258,
         use_cache=True,
@@ -342,18 +356,40 @@ def generate_audio(text: str, lora_name: str | None) -> str:
     return str(path)
 
 
-def generate_batch(prompts: list[str], loras: list[str]) -> list[tuple[str, str]]:
+def generate_batch(
+    prompts: list[str],
+    loras: list[str],
+    temperature: float,
+    top_p: float,
+    repetition_penalty: float,
+    max_new_tokens: int,
+) -> tuple[list[tuple[str, str]], str]:
     """Generate audio for multiple prompts/LORAs."""
     if not prompts:
-        return []
+        return [], ""
     loras = loras or [None]
     results = []
-    for lora in loras:
-        for text in prompts:
-            path = generate_audio(text, None if lora == "<base>" else lora)
-            caption = f"{lora or 'base'}: {text}"[:60]
-            results.append((path, caption))
-    return results
+    last_path = ""
+    total = len(prompts) * len(loras)
+    step = 0
+    with gr.Progress() as progress:
+        for lora in loras:
+            for text in prompts:
+                progress(step / total, desc=f"Generating {lora or 'base'}...")
+                path = generate_audio(
+                    text,
+                    None if lora == "<base>" else lora,
+                    temperature,
+                    top_p,
+                    repetition_penalty,
+                    max_new_tokens,
+                )
+                caption = f"{lora or 'base'}: {text}"[:60]
+                results.append((path, caption))
+                last_path = path
+                step += 1
+        progress(1)
+    return results, last_path
 
 
 # ---- Gradio Interface ----
@@ -396,8 +432,15 @@ with gr.Blocks() as demo:
         prompt_boxes = [gr.Textbox(label=f"Prompt {i+1}", visible=(i == 0)) for i in range(MAX_PROMPTS)]
         prompt_list_dd = gr.Dropdown(choices=prompt_files, label="Prompt list", visible=False)
         lora_used = gr.Dropdown(choices=["<base>"] + lora_choices, multiselect=True, label="LoRA(s)")
+        with gr.Accordion("Advanced Settings", open=False):
+            temperature = gr.Slider(0.1, 1.5, value=0.6, label="Temperature")
+            top_p = gr.Slider(0.5, 1.0, value=0.95, label="Top P")
+            rep_penalty = gr.Slider(1.0, 2.0, value=1.1, label="Repetition Penalty")
+            max_tokens = gr.Number(value=1200, precision=0, label="Max New Tokens")
         infer_btn = gr.Button("Generate")
+        clear_btn = gr.Button("Clear Gallery")
         gallery = gr.Gallery(label="Outputs")
+        last_audio = gr.Audio(label="Last Audio")
 
         def _update(mode_val, n_val):
             n = int(n_val or 1)
@@ -425,13 +468,36 @@ with gr.Blocks() as demo:
                 n = int(n_val or 1)
                 prompts = [p for p in args[:MAX_PROMPTS][:n] if p]
             loras = args[MAX_PROMPTS + 1] if len(args) > MAX_PROMPTS + 1 else []
-            return generate_batch(prompts, loras)
+            temperature = args[MAX_PROMPTS + 2]
+            top_p = args[MAX_PROMPTS + 3]
+            rep_penalty = args[MAX_PROMPTS + 4]
+            max_tokens = int(args[MAX_PROMPTS + 5])
+            return generate_batch(
+                prompts,
+                loras,
+                temperature,
+                top_p,
+                rep_penalty,
+                max_tokens,
+            )
 
         infer_btn.click(
             run_infer,
-            [mode, num_prompts] + prompt_boxes + [prompt_list_dd, lora_used],
-            gallery,
+            [
+                mode,
+                num_prompts,
+                *prompt_boxes,
+                prompt_list_dd,
+                lora_used,
+                temperature,
+                top_p,
+                rep_penalty,
+                max_tokens,
+            ],
+            [gallery, last_audio],
         )
+
+        clear_btn.click(lambda: ([], None), None, [gallery, last_audio], queue=False)
 
     refresh_btn.click(refresh_lists, None, [local_ds, lora_used, prompt_list_dd])
 
