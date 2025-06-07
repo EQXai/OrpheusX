@@ -1,18 +1,42 @@
-# OrpheusX Scripts
+# 🚀 OrpheusX – Speech-to-Speech Fine-Tuning Toolkit
 
-## Installation
+OrpheusX is a powerful tool for creating, training, and running custom speech-to-speech (STS) or text-to-speech (TTS) models. It includes an interactive CLI to guide you through every step.
 
-Run the installation script to fetch all dependencies. It creates a virtual environment named `venv` in the repository root and installs PyTorch 2.6.0 built for CUDA 12.4 automatically. The script also warns if your CUDA runtime is newer.  
-It installs WhisperX and its requirements (`librosa`, `soundfile` and the `ffmpeg` binary) so you can generate datasets from audio files directly.
+---
 
-**Important:** OrpheusX only supports CUDA 12.4 or lower. Using a newer CUDA runtime may cause installation failures.
+## 🛠️ System Requirements
 
-## CLI menu
+- **Python** ≥ 3.10    
+- **CUDA Toolkit**: **version 12.4 only**  
+  ⚠️ *Using a newer CUDA version may cause installation issues.*
 
-You can manage all tasks using the interactive command line menu:
+---
+
+## 📦 Installation
+
+Clone the repository:
+
+```bash
+git clone https://github.com/EQXai/OrpheusX.git
+cd OrpheusX
+```
+
+Everything else (installation, dataset creation, training, inference) is handled interactively through the CLI.
+
+To start:
 
 ```bash
 python scripts/orpheus_cli.py
 ```
 
-The CLI lets you run the installer, create WhisperX datasets, train new LoRA models and launch inference. Each option can loop over multiple datasets or models if desired.
+---
+
+## 🧩 Features
+
+- Install dependencies
+- Create WhisperX datasets
+- Train LoRA models
+- Run inference
+
+All features are available via an interactive command-line menu.
+
