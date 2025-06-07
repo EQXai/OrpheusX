@@ -62,3 +62,15 @@ python scripts/orpheus_cli.py
 
 All features are available via an interactive command-line menu.
 
+---
+
+## 🌐 Gradio Interface
+
+If you prefer a simple web UI instead of the CLI, run:
+
+```bash
+python gradio_app.py
+```
+
+This exposes dataset preparation, training and inference in your browser.
+
