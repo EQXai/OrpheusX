@@ -56,7 +56,7 @@ python scripts/orpheus_cli.py
 ## 🧩 Features
 
 - Install dependencies
-- Create WhisperX datasets
+- Create WhisperX datasets (``prepare_dataset.py`` now accepts ``--model_max_len`` to limit segment length)
 - Train LoRA models
 - Run inference
 

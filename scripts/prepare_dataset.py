@@ -26,6 +26,7 @@ def prepare_dataset(
     output_dir: str,
     max_tokens: int = 50,
     min_duration: float | None = None,
+    model_max_len: int = 2048,
 ) -> None:
     """Transcribe ``audio_path`` and save the dataset under ``output_dir``.
 
@@ -56,6 +57,14 @@ def prepare_dataset(
     else:
         min_len = 10.0
         max_len = 15.0
+
+    # Estimate maximum allowed length based on the model context
+    TEXT_TOKEN_BUFFER = 256
+    SNAC_FRAME_RATE = 12  # Hz
+    TOKENS_PER_SECOND = SNAC_FRAME_RATE * 7
+    allowed_tokens = model_max_len - TEXT_TOKEN_BUFFER
+    max_audio_seconds = allowed_tokens / TOKENS_PER_SECOND
+    max_len = min(max_len, max_audio_seconds)
 
     whisper_run.segment_audio(
         audio_path,
@@ -113,6 +122,12 @@ def main():
         type=float,
         help="Minimum duration in seconds per segment",
     )
+    parser.add_argument(
+        "--model_max_len",
+        type=int,
+        default=2048,
+        help="Model max length used to estimate max audio duration",
+    )
     args = parser.parse_args()
 
     prepare_dataset(
@@ -120,6 +135,7 @@ def main():
         args.output,
         max_tokens=args.max_tokens,
         min_duration=args.min_duration,
+        model_max_len=args.model_max_len,
     )
 
 
