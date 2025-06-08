@@ -57,7 +57,15 @@ def split_prompt_by_sentences(
     text: str, tokenizer, chunk_size: int = 50
 ) -> list[torch.Tensor]:
     """Split text into sentence groups not exceeding ``chunk_size`` tokens."""
-    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
+    raw_parts = [s.strip() for s in re.split(r"(?<=[.!?,])\s+", text.strip()) if s.strip()]
+    sentences: list[str] = []
+    for part in raw_parts:
+        if sentences:
+            prev = sentences[-1]
+            if prev.endswith(",") and (part.endswith(",") or len(part.split()) < 3):
+                sentences[-1] = prev + " " + part
+                continue
+        sentences.append(part)
     segments: list[str] = []
     current: list[str] = []
     for sent in sentences:
