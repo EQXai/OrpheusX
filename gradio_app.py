@@ -12,6 +12,9 @@ from pathlib import Path
 import json
 import gradio as gr
 
+# Helper for audio concatenation with crossfade
+from audio_utils import concat_with_fade
+
 # The prepare_dataset helper can be imported safely
 from scripts.prepare_dataset import prepare_dataset
 
@@ -434,7 +437,7 @@ def generate_audio(
     else:
         segments = [tokenizer(text, return_tensors='pt').input_ids.squeeze(0)]
     audio_parts = [generate_audio_segment(s, model, snac_model) for s in segments]
-    final_audio = torch.cat(audio_parts, dim=-1)
+    final_audio = concat_with_fade(audio_parts)
     lora_name = lora_name or "base_model"
     path = get_output_path(lora_name)
     import torchaudio
