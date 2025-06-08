@@ -12,7 +12,11 @@ from pathlib import Path
 from prepare_dataset import prepare_dataset
 
 
-def main(max_tokens: int = 50, min_duration: float | None = None) -> None:
+def main(
+    max_tokens: int = 50,
+    min_duration: float | None = None,
+    model_max_len: int = 2048,
+) -> None:
     repo_root = Path(__file__).resolve().parent.parent
     audio_dir = repo_root / "source_audio"
     dataset_root = repo_root / "datasets"
@@ -54,6 +58,7 @@ def main(max_tokens: int = 50, min_duration: float | None = None) -> None:
             str(output_dir),
             max_tokens=max_tokens,
             min_duration=min_duration,
+            model_max_len=model_max_len,
         )
 
         print(f"Dataset directory: {output_dir.resolve()}")
@@ -77,6 +82,16 @@ if __name__ == "__main__":
         type=float,
         help="Minimum duration in seconds per segment",
     )
+    parser.add_argument(
+        "--model_max_len",
+        type=int,
+        default=2048,
+        help="Model max length used to estimate max audio duration",
+    )
     args = parser.parse_args()
 
-    main(max_tokens=args.max_tokens, min_duration=args.min_duration)
+    main(
+        max_tokens=args.max_tokens,
+        min_duration=args.min_duration,
+        model_max_len=args.model_max_len,
+    )

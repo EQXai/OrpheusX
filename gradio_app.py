@@ -59,6 +59,7 @@ def prepare_datasets_ui(
     existing: list[str] | None,
     max_tokens: int,
     min_duration: float | None,
+    model_max_len: int,
 ) -> str:
     """Prepare one or more datasets from uploaded or existing audio files."""
     tasks: list[tuple[str, str]] = []
@@ -85,6 +86,7 @@ def prepare_datasets_ui(
                 str(out_dir),
                 max_tokens=max_tokens,
                 min_duration=min_duration,
+                model_max_len=model_max_len,
             )
             msgs.append(f"{ds_name}: success")
         except Exception as e:  # pragma: no cover - best effort
@@ -529,11 +531,19 @@ with gr.Blocks() as demo:
         dataset_name = gr.Textbox(label="Dataset Name (for upload)")
         segment_tokens = gr.Number(value=50, precision=0, label="Max tokens per segment")
         segment_duration = gr.Number(value=10, precision=1, label="Min seconds per segment")
+        model_max_len = gr.Number(value=2048, precision=0, label="Model max length")
         prepare_btn = gr.Button("Prepare")
         prepare_output = gr.Textbox()
         prepare_btn.click(
             prepare_datasets_ui,
-            [audio_input, dataset_name, local_audio, segment_tokens, segment_duration],
+            [
+                audio_input,
+                dataset_name,
+                local_audio,
+                segment_tokens,
+                segment_duration,
+                model_max_len,
+            ],
             prepare_output,
         )
 
