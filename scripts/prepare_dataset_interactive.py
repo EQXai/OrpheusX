@@ -55,6 +55,7 @@ def main(max_tokens: int = 50, min_duration: float | None = None) -> None:
             max_tokens=max_tokens,
             min_duration=min_duration,
         )
+
         print(f"Dataset directory: {output_dir.resolve()}")
         print(f"Parquet file: {(output_dir / 'dataset.parquet').resolve()}")
 
