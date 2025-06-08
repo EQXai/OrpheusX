@@ -24,7 +24,8 @@ from tools.Whisper.upload import load_dataset_from_folder
 def prepare_dataset(audio_path: str, output_dir: str) -> None:
     """Transcribe ``audio_path`` and save the dataset under ``output_dir``.
 
-    Audio is segmented into fragments of ~20 seconds without splitting words.
+    Audio is segmented into fragments of roughly 20 seconds without cutting
+    words so that each clip matches its transcript exactly.
     """
     audio_path = Path(audio_path).resolve()
     base = audio_path.stem

@@ -56,10 +56,11 @@ python scripts/orpheus_cli.py
 ## 🧩 Features
 
 - Install dependencies
-- Create WhisperX datasets with ~20 second segments
+- Create WhisperX datasets with segments about 20 seconds long
 - Train LoRA models
 - Run inference
-- Each audio fragment is automatically cut around 20 seconds without splitting words.
+- Each audio clip aligns exactly with its transcript while staying near 20 seconds.
+
 
 All features are available via an interactive command-line menu.
 
