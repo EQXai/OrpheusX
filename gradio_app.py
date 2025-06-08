@@ -331,56 +331,42 @@ def get_snac_model():
     return _SNAC_MODEL
 
 
-def generate_audio(
-    text: str,
-    lora_name: str | None,
-    temperature: float = 0.6,
-    top_p: float = 0.95,
-    repetition_penalty: float = 1.1,
-    max_new_tokens: int = 1200,
-) -> str:
-    model_name = MODEL_NAME
-    lora_path = None
-    if lora_name:
-        lora_path = LORA_DIR / lora_name / "lora_model"
-    model, tokenizer = load_model(model_name, str(lora_path) if lora_path else None)
+def split_by_tokens(input_ids: torch.Tensor, chunk_size: int = 30) -> list[torch.Tensor]:
+    """Split token ids into chunks of ``chunk_size``."""
+    return [input_ids[i : i + chunk_size] for i in range(0, input_ids.size(0), chunk_size)]
 
-    snac_model = get_snac_model()
 
-    input_ids = tokenizer(text, return_tensors='pt').input_ids
+def generate_audio_segment(tokens: torch.Tensor, model, snac_model) -> torch.Tensor:
     start_token = torch.tensor([[128259]], dtype=torch.int64)
     end_tokens = torch.tensor([[128009, 128260]], dtype=torch.int64)
-    modified_input = torch.cat([start_token, input_ids, end_tokens], dim=1)
+    modified_input = torch.cat([start_token, tokens.unsqueeze(0), end_tokens], dim=1)
     attention_mask = torch.ones_like(modified_input)
-    input_ids_cuda = modified_input.to('cuda')
-    attn_cuda = attention_mask.to('cuda')
+    input_ids_cuda = modified_input.to("cuda")
+    attn_cuda = attention_mask.to("cuda")
     generated = model.generate(
         input_ids=input_ids_cuda,
         attention_mask=attn_cuda,
-        max_new_tokens=max_new_tokens,
+        max_new_tokens=1200,
         do_sample=True,
-        temperature=temperature,
-        top_p=top_p,
-        repetition_penalty=repetition_penalty,
+        temperature=0.6,
+        top_p=0.95,
+        repetition_penalty=1.1,
         num_return_sequences=1,
         eos_token_id=128258,
         use_cache=True,
     )
-
     token_to_find = 128257
     token_to_remove = 128258
     token_indices = (generated == token_to_find).nonzero(as_tuple=True)
     if len(token_indices[1]) > 0:
         last_occurrence_idx = token_indices[1][-1].item()
-        cropped_tensor = generated[:, last_occurrence_idx+1:]
+        cropped_tensor = generated[:, last_occurrence_idx + 1 :]
     else:
         cropped_tensor = generated
-
     processed_rows = []
     for row in cropped_tensor:
         masked_row = row[row != token_to_remove]
         processed_rows.append(masked_row)
-
     code_lists = []
     for row in processed_rows:
         row_length = row.size(0)
@@ -391,26 +377,51 @@ def generate_audio(
 
     def redistribute_codes(code_list):
         layer_1, layer_2, layer_3 = [], [], []
-        for i in range((len(code_list)+1)//7):
-            layer_1.append(code_list[7*i])
-            layer_2.append(code_list[7*i+1]-4096)
-            layer_3.append(code_list[7*i+2]-(2*4096))
-            layer_3.append(code_list[7*i+3]-(3*4096))
-            layer_2.append(code_list[7*i+4]-(4*4096))
-            layer_3.append(code_list[7*i+5]-(5*4096))
-            layer_3.append(code_list[7*i+6]-(6*4096))
-        codes = [torch.tensor(layer_1).unsqueeze(0),
-                 torch.tensor(layer_2).unsqueeze(0),
-                 torch.tensor(layer_3).unsqueeze(0)]
+        for i in range((len(code_list) + 1) // 7):
+            layer_1.append(code_list[7 * i])
+            layer_2.append(code_list[7 * i + 1] - 4096)
+            layer_3.append(code_list[7 * i + 2] - (2 * 4096))
+            layer_3.append(code_list[7 * i + 3] - (3 * 4096))
+            layer_2.append(code_list[7 * i + 4] - (4 * 4096))
+            layer_3.append(code_list[7 * i + 5] - (5 * 4096))
+            layer_3.append(code_list[7 * i + 6] - (6 * 4096))
+        codes = [
+            torch.tensor(layer_1).unsqueeze(0),
+            torch.tensor(layer_2).unsqueeze(0),
+            torch.tensor(layer_3).unsqueeze(0),
+        ]
         audio_hat = snac_model.decode(codes)
         return audio_hat
 
     samples = [redistribute_codes(c) for c in code_lists]
+    return samples[0].squeeze(0)
+
+
+def generate_audio(
+    text: str,
+    lora_name: str | None,
+    temperature: float = 0.6,
+    top_p: float = 0.95,
+    repetition_penalty: float = 1.1,
+    max_new_tokens: int = 1200,
+    segment: bool = False,
+) -> str:
+    model_name = MODEL_NAME
+    lora_path = None
+    if lora_name:
+        lora_path = LORA_DIR / lora_name / "lora_model"
+    model, tokenizer = load_model(model_name, str(lora_path) if lora_path else None)
+
+    snac_model = get_snac_model()
+
+    ids = tokenizer(text, return_tensors='pt').input_ids.squeeze(0)
+    segments = split_by_tokens(ids) if segment else [ids]
+    audio_parts = [generate_audio_segment(s, model, snac_model) for s in segments]
+    final_audio = torch.cat(audio_parts, dim=-1)
     lora_name = lora_name or "base_model"
     path = get_output_path(lora_name)
-    audio_2d = samples[0].squeeze(0)
     import torchaudio
-    torchaudio.save(str(path), audio_2d.detach().cpu(), 24000)
+    torchaudio.save(str(path), final_audio.detach().cpu(), 24000)
     return str(path)
 
 
@@ -421,12 +432,13 @@ def generate_batch(
     top_p: float,
     repetition_penalty: float,
     max_new_tokens: int,
-) -> tuple[list[tuple[str, str]], str]:
+    segment: bool,
+) -> tuple[str, str]:
     """Generate audio for multiple prompts/LORAs."""
     if not prompts:
-        return [], ""
+        return "", ""
     loras = loras or [None]
-    results = []
+    results: list[tuple[str, str]] = []
     last_path = ""
     total = len(prompts) * len(loras)
     step = 0
@@ -441,13 +453,22 @@ def generate_batch(
                 top_p,
                 repetition_penalty,
                 max_new_tokens,
+                segment,
             )
             caption = f"{lora or 'base'}: {text}"[:60]
             results.append((path, caption))
             last_path = path
             step += 1
     progress(1)
-    return results, last_path
+    html_items = []
+    for path, caption in results:
+        html_items.append(
+            f"<div style='margin-bottom:1em'>"
+            f"<p>{caption}</p>"
+            f"<audio controls src='{path}'></audio>"
+            f"</div>"
+        )
+    return "\n".join(html_items), last_path
 
 
 # ---- Gradio Interface ----
@@ -501,9 +522,10 @@ with gr.Blocks() as demo:
             top_p = gr.Slider(0.5, 1.0, value=0.95, label="Top P")
             rep_penalty = gr.Slider(1.0, 2.0, value=1.1, label="Repetition Penalty")
             max_tokens = gr.Number(value=1200, precision=0, label="Max New Tokens")
+            segment_chk = gr.Checkbox(label="Segment text by 30 tokens")
         infer_btn = gr.Button("Generate")
         clear_btn = gr.Button("Clear Gallery")
-        gallery = gr.Gallery(label="Outputs")
+        gallery = gr.HTML(label="Outputs")
         last_audio = gr.Audio(label="Last Audio")
 
         def _update(mode_val, n_val):
@@ -536,6 +558,7 @@ with gr.Blocks() as demo:
             top_p = args[MAX_PROMPTS + 3]
             rep_penalty = args[MAX_PROMPTS + 4]
             max_tokens = int(args[MAX_PROMPTS + 5])
+            segment = args[MAX_PROMPTS + 6]
             return generate_batch(
                 prompts,
                 loras,
@@ -543,6 +566,7 @@ with gr.Blocks() as demo:
                 top_p,
                 rep_penalty,
                 max_tokens,
+                segment,
             )
 
         infer_btn.click(
@@ -557,11 +581,12 @@ with gr.Blocks() as demo:
                 top_p,
                 rep_penalty,
                 max_tokens,
+                segment_chk,
             ],
             [gallery, last_audio],
         )
 
-        clear_btn.click(lambda: ([], None), None, [gallery, last_audio], queue=False)
+        clear_btn.click(lambda: ("", None), None, [gallery, last_audio], queue=False)
 
     refresh_btn.click(refresh_lists, None, [local_ds, lora_used, prompt_list_dd, local_audio])
 
