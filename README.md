@@ -59,6 +59,7 @@ python scripts/orpheus_cli.py
 - Create WhisperX datasets (``prepare_dataset.py`` now accepts ``--model_max_len`` to limit segment length)
 - Train LoRA models
 - Run inference
+- Long WhisperX segments may yield audio clips exceeding the model's context length. ``prepare_dataset.py`` now enforces a hard duration cap via ``--model_max_len`` and the training scripts skip samples that still surpass this limit.
 
 All features are available via an interactive command-line menu.
 
