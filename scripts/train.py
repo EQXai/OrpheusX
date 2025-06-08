@@ -137,6 +137,14 @@ def create_input_ids(example):
     return example
 
 dataset = dataset.map(create_input_ids, remove_columns=['text', 'codes_list'])
+
+# Filter out samples that exceed the model sequence length
+before_len = len(dataset)
+dataset = dataset.filter(lambda x: len(x['input_ids']) <= 2048)
+skipped = before_len - len(dataset)
+if skipped:
+    print(f"Skipped {skipped} sample(s) exceeding 2048 tokens.")
+
 columns_to_keep = ['input_ids', 'labels', 'attention_mask']
 columns_to_remove = [col for col in dataset.column_names if col not in columns_to_keep]
 dataset = dataset.remove_columns(columns_to_remove)
