@@ -137,6 +137,12 @@ def segment_audio(
     max_tokens=50,
     target_samples=None,
 ):
+    """Cut ``audio_path`` into smaller clips based on WhisperX segments.
+
+    Segments longer than ``max_tokens`` are further broken down and their
+    boundaries are estimated proportionally by token count. Each resulting
+    audio clip is guaranteed not to exceed ``max_len`` seconds.
+    """
     with open(json_file, "r", encoding="utf-8") as f:
         data = json.load(f)
 
@@ -159,9 +165,22 @@ def segment_audio(
 
         sub_texts = split_text_to_tokens(text, max_tokens=max_tokens)
 
-        for sub_text, sub_token_count in sub_texts:
+        total_sub_tokens = sum(stc for _, stc in sub_texts)
+        seg_duration = end - start
+        current_pos = start
+
+        for i, (sub_text, sub_token_count) in enumerate(sub_texts):
+            # Compute start/end for this subsegment
+            sub_start = current_pos
+            if i == len(sub_texts) - 1:
+                sub_end = end
+            else:
+                proportion = sub_token_count / total_sub_tokens if total_sub_tokens else 0
+                sub_end = sub_start + seg_duration * proportion
+            current_pos = sub_end
+
             if chunk_start is None:
-                chunk_start = start
+                chunk_start = sub_start
 
             temp_chunk = chunk + [sub_text]
             temp_chunk_text = " ".join(temp_chunk)
@@ -171,7 +190,7 @@ def segment_audio(
             if temp_token_count <= max_tokens:
                 chunk.append(sub_text)
                 chunk_token_count = temp_token_count
-                chunk_end = end
+                chunk_end = sub_end
                 accumulated = chunk_end - chunk_start
             else:
                 if chunk and accumulated >= min_len:
@@ -180,30 +199,60 @@ def segment_audio(
                     out_audio = output_dir / f"{base_name}_{suffix}.wav"
                     out_text = output_dir / f"{base_name}_{suffix}.txt"
 
-                    ffmpeg_cut(audio_path, chunk_start, chunk_end, out_audio, target_samples=target_samples)
+                    final_end = min(chunk_end, chunk_start + max_len)
+                    ffmpeg_cut(
+                        audio_path,
+                        chunk_start,
+                        final_end,
+                        out_audio,
+                        target_samples=int(max_len * 24000),
+                    )
                     with open(out_text, "w", encoding="utf-8") as f:
                         f.write(" ".join(chunk))
                     audio, sr = librosa.load(out_audio, sr=24000)
-                    print(f"Segment {suffix}: {chunk_token_count} tokens, {accumulated:.2f} seconds, {len(audio)} samples")
+                    duration = len(audio) / sr
+                    if duration > max_len:
+                        raise ValueError(
+                            f"Segment {suffix} exceeds max_len: {duration:.2f}s > {max_len}s"
+                        )
+                    print(
+                        f"Segment {suffix}: {chunk_token_count} tokens, {accumulated:.2f} seconds, {len(audio)} samples"
+                    )
 
                 chunk = [sub_text]
                 chunk_token_count = sub_token_count
-                chunk_start = start
-                chunk_end = end
-                accumulated = end - chunk_start
+                chunk_start = sub_start
+                chunk_end = sub_end
+                accumulated = chunk_end - chunk_start
 
-            if accumulated >= max_len or (seg_idx == len(segments) - 1 and sub_text == sub_texts[-1]):
+            if accumulated >= max_len or (
+                seg_idx == len(segments) - 1 and sub_text == sub_texts[-1]
+            ):
                 if chunk and accumulated >= min_len:
                     part += 1
                     suffix = f"{part:03d}"
                     out_audio = output_dir / f"{base_name}_{suffix}.wav"
                     out_text = output_dir / f"{base_name}_{suffix}.txt"
 
-                    ffmpeg_cut(audio_path, chunk_start, chunk_end, out_audio, target_samples=target_samples)
+                    final_end = min(chunk_end, chunk_start + max_len)
+                    ffmpeg_cut(
+                        audio_path,
+                        chunk_start,
+                        final_end,
+                        out_audio,
+                        target_samples=int(max_len * 24000),
+                    )
                     with open(out_text, "w", encoding="utf-8") as f:
                         f.write(" ".join(chunk))
                     audio, sr = librosa.load(out_audio, sr=24000)
-                    print(f"Segment {suffix}: {chunk_token_count} tokens, {accumulated:.2f} seconds, {len(audio)} samples")
+                    duration = len(audio) / sr
+                    if duration > max_len:
+                        raise ValueError(
+                            f"Segment {suffix} exceeds max_len: {duration:.2f}s > {max_len}s"
+                        )
+                    print(
+                        f"Segment {suffix}: {chunk_token_count} tokens, {accumulated:.2f} seconds, {len(audio)} samples"
+                    )
 
                 chunk = []
                 chunk_token_count = 0
@@ -217,10 +266,22 @@ def segment_audio(
         out_audio = output_dir / f"{base_name}_{suffix}.wav"
         out_text = output_dir / f"{base_name}_{suffix}.txt"
 
-        ffmpeg_cut(audio_path, chunk_start, chunk_end, out_audio, target_samples=target_samples)
+        final_end = min(chunk_end, chunk_start + max_len)
+        ffmpeg_cut(
+            audio_path,
+            chunk_start,
+            final_end,
+            out_audio,
+            target_samples=int(max_len * 24000),
+        )
         with open(out_text, "w", encoding="utf-8") as f:
             f.write(" ".join(chunk))
         audio, sr = librosa.load(out_audio, sr=24000)
+        duration = len(audio) / sr
+        if duration > max_len:
+            raise ValueError(
+                f"Segment {suffix} exceeds max_len: {duration:.2f}s > {max_len}s"
+            )
         print(f"Segment {suffix}: {chunk_token_count} tokens, {accumulated:.2f} seconds, {len(audio)} samples")
 
 def main(audio_path):
