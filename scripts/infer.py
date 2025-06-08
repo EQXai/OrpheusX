@@ -23,10 +23,93 @@ def load_model(model_name, lora_path=None):
     FastLanguageModel.for_inference(model)
     return model, tokenizer
 
+
+def split_prompt_by_tokens(text: str, tokenizer, chunk_size: int = 30) -> list[torch.Tensor]:
+    """Split text into token chunks without breaking words."""
+    words = text.split()
+    segments: list[str] = []
+    current_words: list[str] = []
+    token_len = 0
+    for word in words:
+        word_tokens = tokenizer(word, add_special_tokens=False).input_ids
+        if token_len + len(word_tokens) > chunk_size and current_words:
+            segments.append(" ".join(current_words))
+            current_words = [word]
+            token_len = len(word_tokens)
+        else:
+            current_words.append(word)
+            token_len += len(word_tokens)
+    if current_words:
+        segments.append(" ".join(current_words))
+    return [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
+
+
+def generate_audio_segment(tokens: torch.Tensor, model, snac_model) -> torch.Tensor:
+    """Generate audio for given token IDs and return as 1D tensor."""
+    start_token = torch.tensor([[128259]], dtype=torch.int64)
+    end_tokens = torch.tensor([[128009, 128260]], dtype=torch.int64)
+    modified_input = torch.cat([start_token, tokens.unsqueeze(0), end_tokens], dim=1)
+    attention_mask = torch.ones_like(modified_input)
+    input_ids_cuda = modified_input.to("cuda")
+    attn_cuda = attention_mask.to("cuda")
+    generated = model.generate(
+        input_ids=input_ids_cuda,
+        attention_mask=attn_cuda,
+        max_new_tokens=1200,
+        do_sample=True,
+        temperature=0.6,
+        top_p=0.95,
+        repetition_penalty=1.1,
+        num_return_sequences=1,
+        eos_token_id=128258,
+        use_cache=True,
+    )
+    token_to_find = 128257
+    token_to_remove = 128258
+    token_indices = (generated == token_to_find).nonzero(as_tuple=True)
+    if len(token_indices[1]) > 0:
+        last_occurrence_idx = token_indices[1][-1].item()
+        cropped_tensor = generated[:, last_occurrence_idx + 1 :]
+    else:
+        cropped_tensor = generated
+    processed_rows = []
+    for row in cropped_tensor:
+        masked_row = row[row != token_to_remove]
+        processed_rows.append(masked_row)
+    code_lists = []
+    for row in processed_rows:
+        row_length = row.size(0)
+        new_length = (row_length // 7) * 7
+        trimmed_row = row[:new_length]
+        trimmed_row = [t - 128266 for t in trimmed_row]
+        code_lists.append(trimmed_row)
+
+    def redistribute_codes(code_list):
+        layer_1, layer_2, layer_3 = [], [], []
+        for i in range((len(code_list) + 1) // 7):
+            layer_1.append(code_list[7 * i])
+            layer_2.append(code_list[7 * i + 1] - 4096)
+            layer_3.append(code_list[7 * i + 2] - (2 * 4096))
+            layer_3.append(code_list[7 * i + 3] - (3 * 4096))
+            layer_2.append(code_list[7 * i + 4] - (4 * 4096))
+            layer_3.append(code_list[7 * i + 5] - (5 * 4096))
+            layer_3.append(code_list[7 * i + 6] - (6 * 4096))
+        codes = [
+            torch.tensor(layer_1).unsqueeze(0),
+            torch.tensor(layer_2).unsqueeze(0),
+            torch.tensor(layer_3).unsqueeze(0),
+        ]
+        audio_hat = snac_model.decode(codes)
+        return audio_hat
+
+    samples = [redistribute_codes(c) for c in code_lists]
+    return samples[0].squeeze(0)
+
 def main():
     parser = argparse.ArgumentParser(description='Interactive Orpheus TTS inference')
     parser.add_argument('--model', default='unsloth/orpheus-3b-0.1-ft', help='Model name or path')
     parser.add_argument('--lora', default='lora_model', help='Path to trained LoRA adapters')
+    parser.add_argument('--segment', action='store_true', help='Segment prompts every 30 tokens')
     args = parser.parse_args()
     model, tokenizer = load_model(args.model, args.lora)
 
@@ -87,68 +170,15 @@ def main():
             text = input('Enter text (or blank to quit): ').strip()
         if not text:
             break
-        input_ids = tokenizer(text, return_tensors='pt').input_ids
-        start_token = torch.tensor([[128259]], dtype=torch.int64)
-        end_tokens = torch.tensor([[128009, 128260]], dtype=torch.int64)
-        modified_input = torch.cat([start_token, input_ids, end_tokens], dim=1)
-        padding = 0
-        attention_mask = torch.ones_like(modified_input)
-        input_ids_cuda = modified_input.to('cuda')
-        attn_cuda = attention_mask.to('cuda')
-        generated = model.generate(
-            input_ids=input_ids_cuda,
-            attention_mask=attn_cuda,
-            max_new_tokens=1200,
-            do_sample=True,
-            temperature=0.6,
-            top_p=0.95,
-            repetition_penalty=1.1,
-            num_return_sequences=1,
-            eos_token_id=128258,
-            use_cache=True,
-        )
-        token_to_find = 128257
-        token_to_remove = 128258
-        token_indices = (generated == token_to_find).nonzero(as_tuple=True)
-        if len(token_indices[1]) > 0:
-            last_occurrence_idx = token_indices[1][-1].item()
-            cropped_tensor = generated[:, last_occurrence_idx+1:]
+        if args.segment:
+            segments = split_prompt_by_tokens(text, tokenizer)
         else:
-            cropped_tensor = generated
-        processed_rows = []
-        for row in cropped_tensor:
-            masked_row = row[row != token_to_remove]
-            processed_rows.append(masked_row)
-        code_lists = []
-        for row in processed_rows:
-            row_length = row.size(0)
-            new_length = (row_length // 7) * 7
-            trimmed_row = row[:new_length]
-            trimmed_row = [t - 128266 for t in trimmed_row]
-            code_lists.append(trimmed_row)
-        def redistribute_codes(code_list):
-            layer_1 = []
-            layer_2 = []
-            layer_3 = []
-            for i in range((len(code_list)+1)//7):
-                layer_1.append(code_list[7*i])
-                layer_2.append(code_list[7*i+1]-4096)
-                layer_3.append(code_list[7*i+2]-(2*4096))
-                layer_3.append(code_list[7*i+3]-(3*4096))
-                layer_2.append(code_list[7*i+4]-(4*4096))
-                layer_3.append(code_list[7*i+5]-(5*4096))
-                layer_3.append(code_list[7*i+6]-(6*4096))
-            codes = [torch.tensor(layer_1).unsqueeze(0),
-                     torch.tensor(layer_2).unsqueeze(0),
-                     torch.tensor(layer_3).unsqueeze(0)]
-            audio_hat = snac_model.decode(codes)
-            return audio_hat
-        samples = [redistribute_codes(c) for c in code_lists]
-        for sample in samples:
-            path = 'output.wav'
-            audio_2d = sample.squeeze(0)
-            torchaudio.save(path, audio_2d.detach().cpu(), 24000)
-            print(f'Audio written to {path}')
+            segments = [tokenizer(text, return_tensors='pt').input_ids.squeeze(0)]
+        audio_parts = [generate_audio_segment(ids, model, snac_model) for ids in segments]
+        final_audio = torch.cat(audio_parts, dim=-1)
+        path = 'output.wav'
+        torchaudio.save(path, final_audio.detach().cpu(), 24000)
+        print(f'Audio written to {path}')
 
 if __name__ == '__main__':
     main()
