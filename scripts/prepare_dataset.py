@@ -21,8 +21,18 @@ from tools.Whisper import run as whisper_run
 from tools.Whisper.upload import load_dataset_from_folder
 
 
-def prepare_dataset(audio_path: str, output_dir: str) -> None:
-    """Transcribe ``audio_path`` and save the dataset under ``output_dir``."""
+def prepare_dataset(audio_path: str, output_dir: str, max_tokens: int = 50) -> None:
+    """Transcribe ``audio_path`` and save the dataset under ``output_dir``.
+
+    Parameters
+    ----------
+    audio_path : str
+        Path to the source audio file.
+    output_dir : str
+        Directory where the dataset will be stored.
+    max_tokens : int, optional
+        Maximum number of tokens per audio segment. Defaults to 50.
+    """
     audio_path = Path(audio_path).resolve()
     base = audio_path.stem
     temp_out = Path("whisperx_out")
@@ -30,7 +40,12 @@ def prepare_dataset(audio_path: str, output_dir: str) -> None:
 
     # Run WhisperX transcription and segmentation
     json_path = whisper_run.run_whisperx(audio_path, temp_out)
-    whisper_run.segment_audio(audio_path, json_path, segment_out)
+    whisper_run.segment_audio(
+        audio_path,
+        json_path,
+        segment_out,
+        max_tokens=max_tokens,
+    )
 
     # Build Dataset and store it on disk
     dataset = load_dataset_from_folder(segment_out)
@@ -67,9 +82,15 @@ def main():
     parser = argparse.ArgumentParser(description="Transcribe audio and save as dataset")
     parser.add_argument("audio", help="Path to audio file (.mp3 or .wav)")
     parser.add_argument("output", help="Directory to save the dataset")
+    parser.add_argument(
+        "--max_tokens",
+        type=int,
+        default=50,
+        help="Maximum tokens per audio segment",
+    )
     args = parser.parse_args()
 
-    prepare_dataset(args.audio, args.output)
+    prepare_dataset(args.audio, args.output, max_tokens=args.max_tokens)
 
 
 if __name__ == "__main__":

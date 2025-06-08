@@ -12,7 +12,7 @@ from pathlib import Path
 from prepare_dataset import prepare_dataset
 
 
-def main() -> None:
+def main(max_tokens: int = 50) -> None:
     repo_root = Path(__file__).resolve().parent.parent
     audio_dir = repo_root / "source_audio"
     dataset_root = repo_root / "datasets"
@@ -40,14 +40,29 @@ def main() -> None:
     if not indices:
         indices = [1]
 
+    print(f"\nUsing {max_tokens} tokens per segment\n")
+
     for idx in indices:
         selected = audio_files[idx - 1]
         audio_path = audio_dir / selected
         output_dir = dataset_root / Path(selected).stem
-        prepare_dataset(str(audio_path), str(output_dir))
+        prepare_dataset(str(audio_path), str(output_dir), max_tokens=max_tokens)
         print(f"Dataset directory: {output_dir.resolve()}")
         print(f"Parquet file: {(output_dir / 'dataset.parquet').resolve()}")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Interactively prepare datasets using WhisperX"
+    )
+    parser.add_argument(
+        "--max_tokens",
+        type=int,
+        default=50,
+        help="Maximum tokens per audio segment",
+    )
+    args = parser.parse_args()
+
+    main(max_tokens=args.max_tokens)
