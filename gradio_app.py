@@ -57,9 +57,6 @@ def prepare_datasets_ui(
     upload_file: str,
     name: str,
     existing: list[str] | None,
-    max_tokens: int,
-    min_duration: float | None,
-    model_max_len: int,
 ) -> str:
     """Prepare one or more datasets from uploaded or existing audio files."""
     tasks: list[tuple[str, str]] = []
@@ -84,9 +81,6 @@ def prepare_datasets_ui(
             prepare_dataset(
                 audio_path,
                 str(out_dir),
-                max_tokens=max_tokens,
-                min_duration=min_duration if min_duration and min_duration > 0 else None,
-                model_max_len=model_max_len,
             )
             msgs.append(f"{ds_name}: success")
         except Exception as e:  # pragma: no cover - best effort
@@ -112,7 +106,6 @@ def train_lora_single(
     dataset_source: str,
     lora_name: str,
     is_local: bool,
-    model_max_len: int,
 ) -> str:
     """Train a single LoRA on a dataset."""
     if is_local:
@@ -122,7 +115,7 @@ def train_lora_single(
 
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=MODEL_NAME,
-        max_seq_length=model_max_len,
+        max_seq_length=2048,
         dtype=None,
         load_in_4bit=False,
         cache_dir=str(CACHE_DIR),
@@ -235,10 +228,10 @@ def train_lora_single(
     dataset = dataset.map(create_input_ids, remove_columns=['text', 'codes_list'])
 
     before_len = len(dataset)
-    dataset = dataset.filter(lambda x: len(x['input_ids']) <= model_max_len)
+    dataset = dataset.filter(lambda x: len(x['input_ids']) <= 2048)
     skipped = before_len - len(dataset)
     if skipped:
-        print(f"Skipped {skipped} sample(s) exceeding {model_max_len} tokens.")
+        print(f"Skipped {skipped} sample(s) exceeding 2048 tokens.")
 
     columns_to_keep = ['input_ids', 'labels', 'attention_mask']
     columns_to_remove = [col for col in dataset.column_names if col not in columns_to_keep]
@@ -272,7 +265,7 @@ def train_lora_single(
     return f"LoRA saved under {save_dir.resolve()}"
 
 
-def train_loras(hf_links: str, local_datasets: list[str], model_max_len: int) -> str:
+def train_loras(hf_links: str, local_datasets: list[str]) -> str:
     """Train one or more LoRAs based on the provided sources."""
     dataset_info: list[tuple[str, str, bool]] = []
     links = [l.strip() for l in hf_links.splitlines() if l.strip()]
@@ -289,7 +282,7 @@ def train_loras(hf_links: str, local_datasets: list[str], model_max_len: int) ->
     for idx, (src, name, is_local) in enumerate(dataset_info, start=1):
         progress((idx - 1) / total, desc=f"Training {name}...")
         try:
-            msg = train_lora_single(src, name, is_local, model_max_len)
+            msg = train_lora_single(src, name, is_local)
             msgs.append(f"{name}: success")
         except Exception as e:  # pragma: no cover - best effort
             msgs.append(f"{name}: failed ({e})")
@@ -549,9 +542,9 @@ with gr.Blocks() as demo:
         audio_input = gr.Audio(type="filepath", label="Upload audio")
         local_audio = gr.Dropdown(choices=list_source_audio(), multiselect=True, label="Existing audio file(s)")
         dataset_name = gr.Textbox(label="Dataset Name (for upload)")
-        segment_tokens = gr.Number(value=50, precision=0, label="Max tokens per segment")
-        segment_duration = gr.Number(value=0, precision=1, label="Min seconds per segment (0 = auto)")
-        model_max_len = gr.Number(value=2048, precision=0, label="Model max length")
+        segment_tokens = gr.Number(value=50, precision=0, label="Max tokens per segment", visible=False)
+        segment_duration = gr.Number(value=0, precision=1, label="Min seconds per segment", visible=False)
+        model_max_len = gr.Number(value=2048, precision=0, label="Model max length", visible=False)
         prepare_btn = gr.Button("Prepare")
         prepare_output = gr.Textbox()
         prepare_btn.click(
@@ -560,9 +553,6 @@ with gr.Blocks() as demo:
                 audio_input,
                 dataset_name,
                 local_audio,
-                segment_tokens,
-                segment_duration,
-                model_max_len,
             ],
             prepare_output,
         )
@@ -570,10 +560,10 @@ with gr.Blocks() as demo:
     with gr.Tab("Train LoRA"):
         hf_input = gr.Textbox(label="HF dataset link (one per line)")
         local_ds = gr.Dropdown(choices=dataset_choices, multiselect=True, label="Local dataset(s)")
-        model_max_len_train = gr.Number(value=2048, precision=0, label="Model max length")
+        model_max_len_train = gr.Number(value=2048, precision=0, label="Model max length", visible=False)
         train_btn = gr.Button("Train")
         train_output = gr.Textbox()
-        train_btn.click(train_loras, [hf_input, local_ds, model_max_len_train], train_output)
+        train_btn.click(train_loras, [hf_input, local_ds], train_output)
 
     with gr.Tab("Inference"):
         mode = gr.Radio(["Manual", "Prompt List"], value="Manual", label="Prompt source")
