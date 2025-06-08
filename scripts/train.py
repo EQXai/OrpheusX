@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import os
+import argparse
 from unsloth import FastLanguageModel, is_bfloat16_supported
 from datasets import load_dataset
 import torchaudio.transforms as T
@@ -7,12 +8,24 @@ from snac import SNAC
 import torch
 from transformers import TrainingArguments, Trainer
 
+# Parse CLI arguments
+parser = argparse.ArgumentParser(description="Train a LoRA model")
+parser.add_argument(
+    "--model_max_len",
+    type=int,
+    default=2048,
+    help="Model max length used for dataset filtering",
+)
+args = parser.parse_args()
+
+MODEL_MAX_LEN = args.model_max_len
+
 # Load model and tokenizer
-MODEL_NAME = os.environ.get('MODEL_NAME', 'unsloth/orpheus-3b-0.1-ft')
-CACHE_DIR = os.path.join(os.path.dirname(__file__), '..', 'models')
+MODEL_NAME = os.environ.get("MODEL_NAME", "unsloth/orpheus-3b-0.1-ft")
+CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name=MODEL_NAME,
-    max_seq_length=2048,
+    max_seq_length=MODEL_MAX_LEN,
     dtype=None,
     load_in_4bit=False,
     cache_dir=CACHE_DIR,
@@ -140,10 +153,10 @@ dataset = dataset.map(create_input_ids, remove_columns=['text', 'codes_list'])
 
 # Filter out samples that exceed the model sequence length
 before_len = len(dataset)
-dataset = dataset.filter(lambda x: len(x['input_ids']) <= 2048)
+dataset = dataset.filter(lambda x: len(x['input_ids']) <= MODEL_MAX_LEN)
 skipped = before_len - len(dataset)
 if skipped:
-    print(f"Skipped {skipped} sample(s) exceeding 2048 tokens.")
+    print(f"Skipped {skipped} sample(s) exceeding {MODEL_MAX_LEN} tokens.")
 
 columns_to_keep = ['input_ids', 'labels', 'attention_mask']
 columns_to_remove = [col for col in dataset.column_names if col not in columns_to_keep]

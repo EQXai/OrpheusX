@@ -65,8 +65,13 @@ def create_dataset():
 
 def train():
     multi = input("Train multiple models? (y/N): ").strip().lower() == "y"
+    model_len_in = input("Model max length [2048]: ").strip()
+    try:
+        model_max_len = int(model_len_in) if model_len_in else 2048
+    except ValueError:
+        model_max_len = 2048
     while True:
-        run_script(["python", "train_interactive.py"])
+        run_script(["python", "train_interactive.py", "--model_max_len", str(model_max_len)])
         if not multi:
             break
         again = input("Train another model? (y/N): ").strip().lower()
