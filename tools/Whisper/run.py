@@ -132,10 +132,10 @@ def segment_audio(
     audio_path,
     json_file,
     output_dir,
-    min_len=10.0,
-    max_len=15.0,
-    max_tokens=50,
-    target_samples=None,
+    min_len=20.0,
+    max_len=20.0,
+    max_tokens=9999,
+    target_samples=480000,
 ):
     """Cut ``audio_path`` into smaller clips based on WhisperX segments.
 

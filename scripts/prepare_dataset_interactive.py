@@ -12,11 +12,7 @@ from pathlib import Path
 from prepare_dataset import prepare_dataset
 
 
-def main(
-    max_tokens: int = 50,
-    min_duration: float | None = None,
-    model_max_len: int = 2048,
-) -> None:
+def main() -> None:
     repo_root = Path(__file__).resolve().parent.parent
     audio_dir = repo_root / "source_audio"
     dataset_root = repo_root / "datasets"
@@ -44,54 +40,15 @@ def main(
     if not indices:
         indices = [1]
 
-    if min_duration is not None:
-        print(f"\nUsing minimum {min_duration} seconds per segment\n")
-    else:
-        print(f"\nUsing {max_tokens} tokens per segment\n")
-
     for idx in indices:
         selected = audio_files[idx - 1]
         audio_path = audio_dir / selected
         output_dir = dataset_root / Path(selected).stem
-        prepare_dataset(
-            str(audio_path),
-            str(output_dir),
-            max_tokens=max_tokens,
-            min_duration=min_duration,
-            model_max_len=model_max_len,
-        )
+        prepare_dataset(str(audio_path), str(output_dir))
 
         print(f"Dataset directory: {output_dir.resolve()}")
         print(f"Parquet file: {(output_dir / 'dataset.parquet').resolve()}")
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="Interactively prepare datasets using WhisperX"
-    )
-    parser.add_argument(
-        "--max_tokens",
-        type=int,
-        default=50,
-        help="Maximum tokens per audio segment",
-    )
-    parser.add_argument(
-        "--min_duration",
-        type=float,
-        help="Minimum duration in seconds per segment",
-    )
-    parser.add_argument(
-        "--model_max_len",
-        type=int,
-        default=2048,
-        help="Model max length used to estimate max audio duration",
-    )
-    args = parser.parse_args()
-
-    main(
-        max_tokens=args.max_tokens,
-        min_duration=args.min_duration,
-        model_max_len=args.model_max_len,
-    )
+    main()
