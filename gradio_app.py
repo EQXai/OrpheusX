@@ -379,7 +379,12 @@ def split_prompt_by_tokens(text: str, tokenizer, chunk_size: int = 30) -> list[t
     return [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
 
 
-def generate_audio_segment(tokens: torch.Tensor, model, snac_model) -> torch.Tensor:
+def generate_audio_segment(
+    tokens: torch.Tensor,
+    model,
+    snac_model,
+    max_new_tokens: int = 1200,
+) -> torch.Tensor:
     start_token = torch.tensor([[128259]], dtype=torch.int64)
     end_tokens = torch.tensor([[128009, 128260]], dtype=torch.int64)
     modified_input = torch.cat([start_token, tokens.unsqueeze(0), end_tokens], dim=1)
@@ -389,7 +394,7 @@ def generate_audio_segment(tokens: torch.Tensor, model, snac_model) -> torch.Ten
     generated = model.generate(
         input_ids=input_ids_cuda,
         attention_mask=attn_cuda,
-        max_new_tokens=1200,
+        max_new_tokens=max_new_tokens,
         do_sample=True,
         temperature=0.6,
         top_p=0.95,
@@ -461,7 +466,10 @@ def generate_audio(
         segments = split_prompt_by_tokens(text, tokenizer)
     else:
         segments = [tokenizer(text, return_tensors='pt').input_ids.squeeze(0)]
-    audio_parts = [generate_audio_segment(s, model, snac_model) for s in segments]
+    audio_parts = [
+        generate_audio_segment(s, model, snac_model, max_new_tokens=max_new_tokens)
+        for s in segments
+    ]
     final_audio = concat_with_fade(audio_parts)
     lora_name = lora_name or "base_model"
     path = get_output_path(lora_name)
