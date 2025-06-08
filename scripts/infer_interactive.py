@@ -11,6 +11,7 @@ import json
 import argparse
 import torch
 import torchaudio
+import re
 from unsloth import FastLanguageModel
 from snac import SNAC
 from peft import PeftModel
@@ -66,6 +67,26 @@ def split_prompt_by_tokens(text: str, tokenizer, chunk_size: int = 50) -> list[t
         else:
             current.append(w)
             token_len += n_tokens
+    if current:
+        segments.append(" ".join(current))
+    return [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
+
+
+def split_prompt_by_sentences(
+    text: str, tokenizer, chunk_size: int = 50
+) -> list[torch.Tensor]:
+    """Split text into sentence groups up to ``chunk_size`` tokens."""
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
+    segments: list[str] = []
+    current: list[str] = []
+    for sent in sentences:
+        candidate = " ".join(current + [sent])
+        token_len = len(tokenizer(candidate, add_special_tokens=False).input_ids)
+        if token_len > chunk_size and current:
+            segments.append(" ".join(current))
+            current = [sent]
+        else:
+            current.append(sent)
     if current:
         segments.append(" ".join(current))
     return [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
@@ -143,7 +164,13 @@ def main():
     parser.add_argument(
         "--segment",
         action="store_true",
-        help="Segment prompts every 50 tokens",
+        help="Segment prompts",
+    )
+    parser.add_argument(
+        "--segment-by",
+        choices=["tokens", "sentence"],
+        default="tokens",
+        help="Segmentation method when using --segment",
     )
     parser.add_argument(
         "--max_tokens",
@@ -237,8 +264,7 @@ def main():
         segment_choice = True
     else:
         segment_choice = (
-            input("Segment prompts every 50 tokens? (y/N): ").strip().lower()
-            == "y"
+            input("Segment prompts? (y/N): ").strip().lower() == "y"
         )
 
     for lora_choice in selected_loras:
@@ -247,7 +273,10 @@ def main():
 
         for text in prompts:
             if segment_choice:
-                segments = split_prompt_by_tokens(text, tokenizer)
+                if args.segment_by == "sentence":
+                    segments = split_prompt_by_sentences(text, tokenizer)
+                else:
+                    segments = split_prompt_by_tokens(text, tokenizer)
             else:
                 segments = [tokenizer(text, return_tensors="pt").input_ids.squeeze(0)]
             audio_parts = [

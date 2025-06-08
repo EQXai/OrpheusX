@@ -4,6 +4,7 @@ import os
 import json
 import torch
 import torchaudio
+import re
 from unsloth import FastLanguageModel
 from snac import SNAC
 from peft import PeftModel
@@ -49,6 +50,26 @@ def split_prompt_by_tokens(text: str, tokenizer, chunk_size: int = 50) -> list[t
             token_len += len(word_tokens)
     if current_words:
         segments.append(" ".join(current_words))
+    return [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
+
+
+def split_prompt_by_sentences(
+    text: str, tokenizer, chunk_size: int = 50
+) -> list[torch.Tensor]:
+    """Split text into sentence groups not exceeding ``chunk_size`` tokens."""
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
+    segments: list[str] = []
+    current: list[str] = []
+    for sent in sentences:
+        candidate = " ".join(current + [sent])
+        token_len = len(tokenizer(candidate, add_special_tokens=False).input_ids)
+        if token_len > chunk_size and current:
+            segments.append(" ".join(current))
+            current = [sent]
+        else:
+            current.append(sent)
+    if current:
+        segments.append(" ".join(current))
     return [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
 
 
@@ -122,7 +143,13 @@ def main():
     parser = argparse.ArgumentParser(description='Interactive Orpheus TTS inference')
     parser.add_argument('--model', default='unsloth/orpheus-3b-0.1-ft', help='Model name or path')
     parser.add_argument('--lora', default='lora_model', help='Path to trained LoRA adapters')
-    parser.add_argument('--segment', action='store_true', help='Segment prompts every 50 tokens')
+    parser.add_argument('--segment', action='store_true', help='Segment prompts')
+    parser.add_argument(
+        '--segment-by',
+        choices=['tokens', 'sentence'],
+        default='tokens',
+        help='Segmentation method when using --segment',
+    )
     parser.add_argument(
         '--max_tokens',
         type=int,
@@ -190,7 +217,10 @@ def main():
         if not text:
             break
         if args.segment:
-            segments = split_prompt_by_tokens(text, tokenizer)
+            if args.segment_by == 'sentence':
+                segments = split_prompt_by_sentences(text, tokenizer)
+            else:
+                segments = split_prompt_by_tokens(text, tokenizer)
         else:
             segments = [tokenizer(text, return_tensors='pt').input_ids.squeeze(0)]
         audio_parts = [

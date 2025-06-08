@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import json
+import re
 import gradio as gr
 
 # Helper for audio concatenation with crossfade
@@ -372,6 +373,26 @@ def split_prompt_by_tokens(text: str, tokenizer, chunk_size: int = 50) -> list[t
     return [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
 
 
+def split_prompt_by_sentences(
+    text: str, tokenizer, chunk_size: int = 50
+) -> list[torch.Tensor]:
+    """Split text into sentence groups not exceeding ``chunk_size`` tokens."""
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
+    segments: list[str] = []
+    current: list[str] = []
+    for sent in sentences:
+        candidate = " ".join(current + [sent])
+        token_len = len(tokenizer(candidate, add_special_tokens=False).input_ids)
+        if token_len > chunk_size and current:
+            segments.append(" ".join(current))
+            current = [sent]
+        else:
+            current.append(sent)
+    if current:
+        segments.append(" ".join(current))
+    return [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
+
+
 def generate_audio_segment(
     tokens: torch.Tensor,
     model,
@@ -446,6 +467,7 @@ def generate_audio(
     repetition_penalty: float = 1.1,
     max_new_tokens: int = 1200,
     segment: bool = False,
+    segment_by: str = "tokens",
 ) -> str:
     model_name = MODEL_NAME
     lora_path = None
@@ -456,7 +478,10 @@ def generate_audio(
     snac_model = get_snac_model()
 
     if segment:
-        segments = split_prompt_by_tokens(text, tokenizer)
+        if segment_by == "sentence":
+            segments = split_prompt_by_sentences(text, tokenizer)
+        else:
+            segments = split_prompt_by_tokens(text, tokenizer)
     else:
         segments = [tokenizer(text, return_tensors='pt').input_ids.squeeze(0)]
     audio_parts = [
@@ -479,6 +504,7 @@ def generate_batch(
     repetition_penalty: float,
     max_new_tokens: int,
     segment: bool,
+    segment_by: str,
 ) -> tuple[str, str]:
     """Generate audio for multiple prompts/LORAs."""
     if not prompts:
@@ -500,6 +526,7 @@ def generate_batch(
                 repetition_penalty,
                 max_new_tokens,
                 segment,
+                segment_by,
             )
             caption = f"{lora or 'base'}: {text}"[:60]
             results.append((path, caption))
@@ -576,7 +603,8 @@ with gr.Blocks() as demo:
             top_p = gr.Slider(0.5, 1.0, value=0.95, label="Top P")
             rep_penalty = gr.Slider(1.0, 2.0, value=1.1, label="Repetition Penalty")
             max_tokens = gr.Number(value=1200, precision=0, label="Max New Tokens")
-            segment_chk = gr.Checkbox(label="Segment text by 50 tokens")
+            segment_chk = gr.Checkbox(label="Segment text")
+            segment_method = gr.Radio(["tokens", "sentence"], value="tokens", label="Segment by")
         infer_btn = gr.Button("Generate")
         clear_btn = gr.Button("Clear Gallery")
         gallery = gr.HTML(label="Outputs")
@@ -613,6 +641,7 @@ with gr.Blocks() as demo:
             rep_penalty = args[MAX_PROMPTS + 4]
             max_tokens = int(args[MAX_PROMPTS + 5])
             segment = args[MAX_PROMPTS + 6]
+            seg_method = args[MAX_PROMPTS + 7]
             return generate_batch(
                 prompts,
                 loras,
@@ -621,6 +650,7 @@ with gr.Blocks() as demo:
                 rep_penalty,
                 max_tokens,
                 segment,
+                seg_method,
             )
 
         infer_btn.click(
@@ -636,6 +666,7 @@ with gr.Blocks() as demo:
                 rep_penalty,
                 max_tokens,
                 segment_chk,
+                segment_method,
             ],
             [gallery, last_audio],
         )

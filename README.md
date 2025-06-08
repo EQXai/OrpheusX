@@ -81,3 +81,10 @@ The "Max New Tokens" setting defaults to 1200. The model has a 2048 token
 context limit, so the sum of prompt tokens and new tokens should not exceed
 this value.
 
+### Prompt Segmentation
+
+Long prompts can be split automatically during inference to avoid hitting the
+token limit. Use `--segment` along with `--segment-by tokens` (default) or
+`--segment-by sentence` to control how text is chunked. Sentence segmentation
+usually produces smoother audio because pauses occur at natural boundaries.
+
