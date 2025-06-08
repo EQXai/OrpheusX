@@ -15,6 +15,14 @@ from unsloth import FastLanguageModel
 from snac import SNAC
 from peft import PeftModel
 
+# Ensure repo root is on the path when executed from ``scripts``
+import sys
+repo_root = os.path.dirname(os.path.dirname(__file__))
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
+
+from audio_utils import concat_with_fade
+
 CACHE_DIR = os.path.join(os.path.dirname(__file__), '..', 'models')
 
 def load_model(model_name, lora_path=None):
@@ -234,7 +242,7 @@ def main():
             audio_parts = [
                 generate_audio_segment(ids, model, snac_model) for ids in segments
             ]
-            final_audio = torch.cat(audio_parts, dim=-1)
+            final_audio = concat_with_fade(audio_parts)
             path = get_output_path(lora_choice or "base_model")
             torchaudio.save(path, final_audio.detach().cpu(), 24000)
             print(f"Audio written to {path}")
