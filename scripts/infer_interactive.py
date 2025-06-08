@@ -43,9 +43,24 @@ def get_output_path(lora_name: str, ext: str = ".wav") -> str:
         idx += 1
 
 
-def split_by_tokens(input_ids: torch.Tensor, chunk_size: int = 30) -> list[torch.Tensor]:
-    """Split a tensor of token ids into chunks of ``chunk_size``."""
-    return [input_ids[i : i + chunk_size] for i in range(0, input_ids.size(0), chunk_size)]
+def split_prompt_by_tokens(text: str, tokenizer, chunk_size: int = 30) -> list[torch.Tensor]:
+    """Split text into token chunks without breaking words."""
+    words = text.split()
+    segments: list[str] = []
+    current: list[str] = []
+    token_len = 0
+    for w in words:
+        n_tokens = len(tokenizer(w, add_special_tokens=False).input_ids)
+        if token_len + n_tokens > chunk_size and current:
+            segments.append(" ".join(current))
+            current = [w]
+            token_len = n_tokens
+        else:
+            current.append(w)
+            token_len += n_tokens
+    if current:
+        segments.append(" ".join(current))
+    return [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
 
 
 def generate_audio_segment(tokens: torch.Tensor, model, snac_model) -> torch.Tensor:
@@ -212,8 +227,10 @@ def main():
         model, tokenizer = load_model(model_name, lora_path)
 
         for text in prompts:
-            full_ids = tokenizer(text, return_tensors="pt").input_ids.squeeze(0)
-            segments = split_by_tokens(full_ids) if segment_choice else [full_ids]
+            if segment_choice:
+                segments = split_prompt_by_tokens(text, tokenizer)
+            else:
+                segments = [tokenizer(text, return_tensors="pt").input_ids.squeeze(0)]
             audio_parts = [
                 generate_audio_segment(ids, model, snac_model) for ids in segments
             ]

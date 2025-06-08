@@ -331,9 +331,24 @@ def get_snac_model():
     return _SNAC_MODEL
 
 
-def split_by_tokens(input_ids: torch.Tensor, chunk_size: int = 30) -> list[torch.Tensor]:
-    """Split token ids into chunks of ``chunk_size``."""
-    return [input_ids[i : i + chunk_size] for i in range(0, input_ids.size(0), chunk_size)]
+def split_prompt_by_tokens(text: str, tokenizer, chunk_size: int = 30) -> list[torch.Tensor]:
+    """Split text into token chunks without cutting words."""
+    words = text.split()
+    segments: list[str] = []
+    current: list[str] = []
+    token_len = 0
+    for w in words:
+        n_tokens = len(tokenizer(w, add_special_tokens=False).input_ids)
+        if token_len + n_tokens > chunk_size and current:
+            segments.append(" ".join(current))
+            current = [w]
+            token_len = n_tokens
+        else:
+            current.append(w)
+            token_len += n_tokens
+    if current:
+        segments.append(" ".join(current))
+    return [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
 
 
 def generate_audio_segment(tokens: torch.Tensor, model, snac_model) -> torch.Tensor:
@@ -414,8 +429,10 @@ def generate_audio(
 
     snac_model = get_snac_model()
 
-    ids = tokenizer(text, return_tensors='pt').input_ids.squeeze(0)
-    segments = split_by_tokens(ids) if segment else [ids]
+    if segment:
+        segments = split_prompt_by_tokens(text, tokenizer)
+    else:
+        segments = [tokenizer(text, return_tensors='pt').input_ids.squeeze(0)]
     audio_parts = [generate_audio_segment(s, model, snac_model) for s in segments]
     final_audio = torch.cat(audio_parts, dim=-1)
     lora_name = lora_name or "base_model"
@@ -465,7 +482,7 @@ def generate_batch(
         html_items.append(
             f"<div style='margin-bottom:1em'>"
             f"<p>{caption}</p>"
-            f"<audio controls src='{path}'></audio>"
+            f"<audio controls src='file={path}'></audio>"
             f"</div>"
         )
     return "\n".join(html_items), last_path
