@@ -3,6 +3,7 @@ import torch
 def concat_with_fade(chunks, sample_rate=24000, fade_ms=20):
     """Concatenate audio tensors with a short crossfade.
 
+
     Parameters
     ----------
     chunks : list[torch.Tensor]
