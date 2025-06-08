@@ -58,6 +58,7 @@ def prepare_datasets_ui(
     name: str,
     existing: list[str] | None,
     max_tokens: int,
+    min_duration: float | None,
 ) -> str:
     """Prepare one or more datasets from uploaded or existing audio files."""
     tasks: list[tuple[str, str]] = []
@@ -79,7 +80,12 @@ def prepare_datasets_ui(
         out_dir = DATASETS_DIR / ds_name
         out_dir.parent.mkdir(parents=True, exist_ok=True)
         try:
-            prepare_dataset(audio_path, str(out_dir), max_tokens=max_tokens)
+            prepare_dataset(
+                audio_path,
+                str(out_dir),
+                max_tokens=max_tokens,
+                min_duration=min_duration,
+            )
             msgs.append(f"{ds_name}: success")
         except Exception as e:  # pragma: no cover - best effort
             msgs.append(f"{ds_name}: failed ({e})")
@@ -522,11 +528,12 @@ with gr.Blocks() as demo:
         local_audio = gr.Dropdown(choices=list_source_audio(), multiselect=True, label="Existing audio file(s)")
         dataset_name = gr.Textbox(label="Dataset Name (for upload)")
         segment_tokens = gr.Number(value=50, precision=0, label="Max tokens per segment")
+        segment_duration = gr.Number(value=10, precision=1, label="Min seconds per segment")
         prepare_btn = gr.Button("Prepare")
         prepare_output = gr.Textbox()
         prepare_btn.click(
             prepare_datasets_ui,
-            [audio_input, dataset_name, local_audio, segment_tokens],
+            [audio_input, dataset_name, local_audio, segment_tokens, segment_duration],
             prepare_output,
         )
 

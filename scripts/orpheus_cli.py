@@ -23,10 +23,20 @@ def install():
 
 def create_dataset():
     multi = input("Create datasets in batch? (y/N): ").strip().lower() == "y"
-    max_tok_in = input("Max tokens per segment [50]: ").strip()
-    max_tokens = int(max_tok_in) if max_tok_in.isdigit() else 50
+    use_dur = input("Segment by duration instead of tokens? (y/N): ").strip().lower() == "y"
+    if use_dur:
+        min_dur_in = input("Min seconds per segment [10]: ").strip()
+        try:
+            min_duration = float(min_dur_in) if min_dur_in else 10.0
+        except ValueError:
+            min_duration = 10.0
+        cmd = ["python", "prepare_dataset_interactive.py", "--min_duration", str(min_duration)]
+    else:
+        max_tok_in = input("Max tokens per segment [50]: ").strip()
+        max_tokens = int(max_tok_in) if max_tok_in.isdigit() else 50
+        cmd = ["python", "prepare_dataset_interactive.py", "--max_tokens", str(max_tokens)]
     while True:
-        run_script(["python", "prepare_dataset_interactive.py", "--max_tokens", str(max_tokens)])
+        run_script(cmd)
         if not multi:
             break
         again = input("Create another dataset? (y/N): ").strip().lower()
