@@ -71,7 +71,12 @@ def split_prompt_by_tokens(text: str, tokenizer, chunk_size: int = 30) -> list[t
     return [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
 
 
-def generate_audio_segment(tokens: torch.Tensor, model, snac_model) -> torch.Tensor:
+def generate_audio_segment(
+    tokens: torch.Tensor,
+    model,
+    snac_model,
+    max_new_tokens: int = 1200,
+) -> torch.Tensor:
     """Generate audio for a single token chunk and return as 1D tensor."""
     start_token = torch.tensor([[128259]], dtype=torch.int64)
     end_tokens = torch.tensor([[128009, 128260]], dtype=torch.int64)
@@ -82,7 +87,7 @@ def generate_audio_segment(tokens: torch.Tensor, model, snac_model) -> torch.Ten
     generated = model.generate(
         input_ids=input_ids_cuda,
         attention_mask=attn_cuda,
-        max_new_tokens=1200,
+        max_new_tokens=max_new_tokens,
         do_sample=True,
         temperature=0.6,
         top_p=0.95,
@@ -139,6 +144,12 @@ def main():
         "--segment",
         action="store_true",
         help="Segment prompts every 30 tokens",
+    )
+    parser.add_argument(
+        "--max_tokens",
+        type=int,
+        default=1200,
+        help="Maximum number of tokens to generate",
     )
     args = parser.parse_args()
 
@@ -240,7 +251,10 @@ def main():
             else:
                 segments = [tokenizer(text, return_tensors="pt").input_ids.squeeze(0)]
             audio_parts = [
-                generate_audio_segment(ids, model, snac_model) for ids in segments
+                generate_audio_segment(
+                    ids, model, snac_model, max_new_tokens=args.max_tokens
+                )
+                for ids in segments
             ]
             final_audio = concat_with_fade(audio_parts)
             path = get_output_path(lora_choice or "base_model")

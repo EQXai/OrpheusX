@@ -77,3 +77,7 @@ The web UI lets you prepare datasets, train LoRAs and run inference.
 Training and inference tabs include dropdowns listing local datasets or
 available LoRA models and can also load prompt lists from `prompt_list/`.
 
+The "Max New Tokens" setting defaults to 1200. The model has a 2048 token
+context limit, so the sum of prompt tokens and new tokens should not exceed
+this value.
+
