@@ -132,16 +132,17 @@ def segment_audio(
     audio_path,
     json_file,
     output_dir,
-    min_len=10.0,
-    max_len=20.0,
+    min_len=15.0,
+    max_len=25.0,
     max_tokens=50,
     target_samples=None,
 ):
     """Cut ``audio_path`` into smaller clips based on WhisperX segments.
 
-    Segments longer than ``max_tokens`` are further broken down and their
-    boundaries are estimated proportionally by token count. Each resulting
-    audio clip is guaranteed not to exceed ``max_len`` seconds.
+    Segments are combined so each audio clip lasts between ``min_len`` and
+    ``max_len`` seconds when possible. Long segments are broken down by token
+    count, and boundaries are always placed on word edges so that the audio and
+    text match exactly.
     """
     with open(json_file, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -155,6 +156,7 @@ def segment_audio(
     chunk_start = None
     chunk_end = None
     accumulated = 0.0
+    target_len = (min_len + max_len) / 2
     part = 0
     base_name = audio_path.stem
 
@@ -206,7 +208,11 @@ def segment_audio(
             new_token_count = len(tokenizer(" ".join(new_chunk), add_special_tokens=True)["input_ids"])
             new_len = sub_end - chunk_start
 
-            if chunk and (new_token_count > max_tokens or new_len > max_len):
+            if chunk and (
+                new_token_count > max_tokens
+                or new_len > max_len
+                or new_len >= target_len
+            ):
                 flush_chunk()
                 chunk.append(sub_text)
                 chunk_token_count = sub_token_count
