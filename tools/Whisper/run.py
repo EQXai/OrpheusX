@@ -25,34 +25,71 @@ def run_whisperx(audio_path, output_dir):
 
     return output_dir / f"{audio_path.stem}.json"
 
-def ffmpeg_cut(input_file, start_time, end_time, output_wav_file, target_samples=335752, sampling_rate=24000):
-    # Calculate the duration in seconds for the target number of samples
-    target_duration = target_samples / sampling_rate
+def ffmpeg_cut(
+    input_file,
+    start_time,
+    end_time,
+    output_wav_file,
+    target_samples=None,
+    sampling_rate=24000,
+):
+    """Cut ``input_file`` between ``start_time`` and ``end_time``.
+
+    Parameters
+    ----------
+    input_file : str or Path
+        Source audio file.
+    start_time, end_time : float
+        Segment boundaries in seconds.
+    output_wav_file : Path
+        Destination ``.wav`` file.
+    target_samples : int | None, optional
+        If provided, trim or pad the audio to exactly this number of samples.
+    sampling_rate : int, optional
+        Sampling rate for the output audio. Defaults to 24000.
+    """
+
     duration = end_time - start_time
 
     # Create a temporary filename for the initial cut in MP3
     temp_mp3_for_cut = output_wav_file.with_suffix('.temp_cut.mp3')
 
     # Perform the initial cut to a temporary MP3 file
-    subprocess.run([
-        "ffmpeg", "-y",
-        "-ss", f"{start_time:.3f}",
-        "-i", input_file,
-        "-t", f"{min(duration, target_duration):.3f}",
-        "-ar", str(sampling_rate),
-        "-c:a", "mp3",
-        str(temp_mp3_for_cut)
-    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    cut_duration = duration
+    if target_samples is not None:
+        target_duration = target_samples / sampling_rate
+        cut_duration = min(duration, target_duration)
+
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-ss",
+            f"{start_time:.3f}",
+            "-i",
+            input_file,
+            "-t",
+            f"{cut_duration:.3f}",
+            "-ar",
+            str(sampling_rate),
+            "-c:a",
+            "mp3",
+            str(temp_mp3_for_cut),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
     # Load the audio from the temporary MP3
     audio, sr = librosa.load(temp_mp3_for_cut, sr=sampling_rate)
     temp_mp3_for_cut.unlink()  # Delete the temporary MP3 file
 
-    # Verify and standardize the audio length
-    if len(audio) > target_samples:
-        audio = audio[:target_samples]
-    elif len(audio) < target_samples:
-        audio = np.pad(audio, (0, target_samples - len(audio)), mode='constant')
+    # Optionally verify and standardize the audio length
+    if target_samples is not None:
+        if len(audio) > target_samples:
+            audio = audio[:target_samples]
+        elif len(audio) < target_samples:
+            audio = np.pad(audio, (0, target_samples - len(audio)), mode="constant")
     
     # Save the standardized audio as the final WAV file
     sf.write(output_wav_file, audio, sr)
@@ -91,7 +128,15 @@ def split_text_to_tokens(text, max_tokens=50):
 
     return subsegments
 
-def segment_audio(audio_path, json_file, output_dir, min_len=10.0, max_len=15.0, max_tokens=50, target_samples=335752):
+def segment_audio(
+    audio_path,
+    json_file,
+    output_dir,
+    min_len=10.0,
+    max_len=15.0,
+    max_tokens=50,
+    target_samples=None,
+):
     with open(json_file, "r", encoding="utf-8") as f:
         data = json.load(f)
 
