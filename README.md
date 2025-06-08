@@ -56,10 +56,10 @@ python scripts/orpheus_cli.py
 ## 🧩 Features
 
 - Install dependencies
-- Create WhisperX datasets (``prepare_dataset.py`` now accepts ``--model_max_len`` to limit segment length)
+- Create WhisperX datasets (``prepare_dataset.py`` accepts ``--model_max_len`` to cap segment duration based on the model context)
 - Train LoRA models
 - Run inference
-- Long WhisperX segments may yield audio clips exceeding the model's context length. ``prepare_dataset.py`` now enforces a hard duration cap via ``--model_max_len`` and the training scripts skip samples that still surpass this limit.
+- Long WhisperX segments may yield audio clips exceeding the model's context length. ``prepare_dataset.py`` computes a duration cap from ``--model_max_len`` and training scripts skip samples that still surpass this limit.
 
 All features are available via an interactive command-line menu.
 
@@ -76,6 +76,8 @@ The script will ask which port you want to use before launching.
 The web UI lets you prepare datasets, train LoRAs and run inference.
 Training and inference tabs include dropdowns listing local datasets or
 available LoRA models and can also load prompt lists from `prompt_list/`.
+
+To let dataset segments stretch up to the context limit, set **Min seconds per segment** to `0` so the value from **Model max length** is used automatically.
 
 The "Max New Tokens" setting defaults to 1200. The model has a 2048 token
 context limit, so the sum of prompt tokens and new tokens should not exceed
