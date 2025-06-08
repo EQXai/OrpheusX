@@ -23,8 +23,10 @@ def install():
 
 def create_dataset():
     multi = input("Create datasets in batch? (y/N): ").strip().lower() == "y"
+    max_tok_in = input("Max tokens per segment [50]: ").strip()
+    max_tokens = int(max_tok_in) if max_tok_in.isdigit() else 50
     while True:
-        run_script(["python", "prepare_dataset_interactive.py"])
+        run_script(["python", "prepare_dataset_interactive.py", "--max_tokens", str(max_tokens)])
         if not multi:
             break
         again = input("Create another dataset? (y/N): ").strip().lower()
