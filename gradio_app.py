@@ -108,7 +108,12 @@ MODEL_NAME = os.environ.get("MODEL_NAME", "unsloth/orpheus-3b-0.1-ft")
 CACHE_DIR = REPO_ROOT / "models"
 
 
-def train_lora_single(dataset_source: str, lora_name: str, is_local: bool) -> str:
+def train_lora_single(
+    dataset_source: str,
+    lora_name: str,
+    is_local: bool,
+    model_max_len: int,
+) -> str:
     """Train a single LoRA on a dataset."""
     if is_local:
         dataset = load_from_disk(dataset_source)
@@ -117,7 +122,7 @@ def train_lora_single(dataset_source: str, lora_name: str, is_local: bool) -> st
 
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=MODEL_NAME,
-        max_seq_length=2048,
+        max_seq_length=model_max_len,
         dtype=None,
         load_in_4bit=False,
         cache_dir=str(CACHE_DIR),
@@ -228,6 +233,13 @@ def train_lora_single(dataset_source: str, lora_name: str, is_local: bool) -> st
         return example
 
     dataset = dataset.map(create_input_ids, remove_columns=['text', 'codes_list'])
+
+    before_len = len(dataset)
+    dataset = dataset.filter(lambda x: len(x['input_ids']) <= model_max_len)
+    skipped = before_len - len(dataset)
+    if skipped:
+        print(f"Skipped {skipped} sample(s) exceeding {model_max_len} tokens.")
+
     columns_to_keep = ['input_ids', 'labels', 'attention_mask']
     columns_to_remove = [col for col in dataset.column_names if col not in columns_to_keep]
     dataset = dataset.remove_columns(columns_to_remove)
@@ -260,7 +272,7 @@ def train_lora_single(dataset_source: str, lora_name: str, is_local: bool) -> st
     return f"LoRA saved under {save_dir.resolve()}"
 
 
-def train_loras(hf_links: str, local_datasets: list[str]) -> str:
+def train_loras(hf_links: str, local_datasets: list[str], model_max_len: int) -> str:
     """Train one or more LoRAs based on the provided sources."""
     dataset_info: list[tuple[str, str, bool]] = []
     links = [l.strip() for l in hf_links.splitlines() if l.strip()]
@@ -277,7 +289,7 @@ def train_loras(hf_links: str, local_datasets: list[str]) -> str:
     for idx, (src, name, is_local) in enumerate(dataset_info, start=1):
         progress((idx - 1) / total, desc=f"Training {name}...")
         try:
-            msg = train_lora_single(src, name, is_local)
+            msg = train_lora_single(src, name, is_local, model_max_len)
             msgs.append(f"{name}: success")
         except Exception as e:  # pragma: no cover - best effort
             msgs.append(f"{name}: failed ({e})")
@@ -550,9 +562,10 @@ with gr.Blocks() as demo:
     with gr.Tab("Train LoRA"):
         hf_input = gr.Textbox(label="HF dataset link (one per line)")
         local_ds = gr.Dropdown(choices=dataset_choices, multiselect=True, label="Local dataset(s)")
+        model_max_len_train = gr.Number(value=2048, precision=0, label="Model max length")
         train_btn = gr.Button("Train")
         train_output = gr.Textbox()
-        train_btn.click(train_loras, [hf_input, local_ds], train_output)
+        train_btn.click(train_loras, [hf_input, local_ds, model_max_len_train], train_output)
 
     with gr.Tab("Inference"):
         mode = gr.Radio(["Manual", "Prompt List"], value="Manual", label="Prompt source")

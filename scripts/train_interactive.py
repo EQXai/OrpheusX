@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+import argparse
 from unsloth import FastLanguageModel, is_bfloat16_supported
 from datasets import load_dataset, load_from_disk, concatenate_datasets
 import torchaudio.transforms as T
@@ -17,8 +18,19 @@ import torch
 from transformers import TrainingArguments, Trainer
 
 # Model constants
-MODEL_NAME = os.environ.get('MODEL_NAME', 'unsloth/orpheus-3b-0.1-ft')
-CACHE_DIR = os.path.join(os.path.dirname(__file__), '..', 'models')
+parser = argparse.ArgumentParser(description="Interactively train a LoRA model")
+parser.add_argument(
+    "--model_max_len",
+    type=int,
+    default=2048,
+    help="Model max length used for dataset filtering",
+)
+args = parser.parse_args()
+
+MODEL_MAX_LEN = args.model_max_len
+
+MODEL_NAME = os.environ.get("MODEL_NAME", "unsloth/orpheus-3b-0.1-ft")
+CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
 
 # dataset loading with interactive prompt
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'datasets')
@@ -59,7 +71,12 @@ else:
     name = dataset_link.split('/')[-1]
     dataset_info.append((dataset_link, name, False))
 
-def train_dataset(dataset_source: str, lora_name: str, is_local: bool) -> None:
+def train_dataset(
+    dataset_source: str,
+    lora_name: str,
+    is_local: bool,
+    model_max_len: int,
+) -> None:
     """Train a LoRA on a single dataset."""
 
     # Load dataset
@@ -71,7 +88,7 @@ def train_dataset(dataset_source: str, lora_name: str, is_local: bool) -> None:
     # Load model and tokenizer fresh for each dataset
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=MODEL_NAME,
-        max_seq_length=2048,
+        max_seq_length=model_max_len,
         dtype=None,
         load_in_4bit=False,
         cache_dir=CACHE_DIR,
@@ -196,10 +213,10 @@ ensure that the dataset includes a 'source' field and format the input according
 
     # Filter out samples that exceed the model sequence length
     before_len = len(dataset)
-    dataset = dataset.filter(lambda x: len(x['input_ids']) <= 2048)
+    dataset = dataset.filter(lambda x: len(x['input_ids']) <= model_max_len)
     skipped = before_len - len(dataset)
     if skipped:
-        print(f"Skipped {skipped} sample(s) exceeding 2048 tokens.")
+        print(f"Skipped {skipped} sample(s) exceeding {model_max_len} tokens.")
 
     columns_to_keep = ['input_ids', 'labels', 'attention_mask']
     columns_to_remove = [col for col in dataset.column_names if col not in columns_to_keep]
@@ -252,5 +269,5 @@ ensure that the dataset includes a 'source' field and format the input according
 
 for src, name, is_local in dataset_info:
     print(f"\nStarting training for dataset: {name}\n")
-    train_dataset(src, name, is_local)
+    train_dataset(src, name, is_local, MODEL_MAX_LEN)
 
