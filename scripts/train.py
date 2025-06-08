@@ -10,15 +10,9 @@ from transformers import TrainingArguments, Trainer
 
 # Parse CLI arguments
 parser = argparse.ArgumentParser(description="Train a LoRA model")
-parser.add_argument(
-    "--model_max_len",
-    type=int,
-    default=2048,
-    help="Model max length used for dataset filtering",
-)
-args = parser.parse_args()
+args = parser.parse_args([])
 
-MODEL_MAX_LEN = args.model_max_len
+MODEL_MAX_LEN = 2048
 
 # Load model and tokenizer
 MODEL_NAME = os.environ.get("MODEL_NAME", "unsloth/orpheus-3b-0.1-ft")
