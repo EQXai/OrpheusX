@@ -85,7 +85,7 @@ def prepare_datasets_ui(
                 audio_path,
                 str(out_dir),
                 max_tokens=max_tokens,
-                min_duration=min_duration,
+                min_duration=min_duration if min_duration and min_duration > 0 else None,
                 model_max_len=model_max_len,
             )
             msgs.append(f"{ds_name}: success")
@@ -550,7 +550,7 @@ with gr.Blocks() as demo:
         local_audio = gr.Dropdown(choices=list_source_audio(), multiselect=True, label="Existing audio file(s)")
         dataset_name = gr.Textbox(label="Dataset Name (for upload)")
         segment_tokens = gr.Number(value=50, precision=0, label="Max tokens per segment")
-        segment_duration = gr.Number(value=10, precision=1, label="Min seconds per segment")
+        segment_duration = gr.Number(value=0, precision=1, label="Min seconds per segment (0 = auto)")
         model_max_len = gr.Number(value=2048, precision=0, label="Model max length")
         prepare_btn = gr.Button("Prepare")
         prepare_output = gr.Textbox()

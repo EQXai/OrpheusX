@@ -59,12 +59,21 @@ def prepare_dataset(
         max_len = 15.0
 
     # Estimate maximum allowed length based on the model context
+    # A small buffer is subtracted from ``model_max_len`` to account for the text
+    # tokens generated during inference. ``TOKENS_PER_SECOND`` is an empirical
+    # mapping from audio length to token count.
     TEXT_TOKEN_BUFFER = 256
     SNAC_FRAME_RATE = 12  # Hz
     TOKENS_PER_SECOND = SNAC_FRAME_RATE * 7
     allowed_tokens = model_max_len - TEXT_TOKEN_BUFFER
     max_audio_seconds = allowed_tokens / TOKENS_PER_SECOND
-    max_len = min(max_len, max_audio_seconds)
+
+    if min_duration is not None:
+        # When ``min_duration`` is provided we still enforce the context limit
+        max_len = min(max_len, max_audio_seconds)
+    else:
+        # Otherwise, allow segments up to the context limit
+        max_len = max_audio_seconds
 
     whisper_run.segment_audio(
         audio_path,
