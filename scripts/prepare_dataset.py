@@ -64,6 +64,7 @@ def prepare_dataset(
         min_len=min_len,
         max_len=max_len,
         max_tokens=max_tokens,
+        target_samples=None,
     )
 
     # Build Dataset and store it on disk
