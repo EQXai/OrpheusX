@@ -51,7 +51,7 @@ def get_output_path(lora_name: str, ext: str = ".wav") -> str:
         idx += 1
 
 
-def split_prompt_by_tokens(text: str, tokenizer, chunk_size: int = 30) -> list[torch.Tensor]:
+def split_prompt_by_tokens(text: str, tokenizer, chunk_size: int = 50) -> list[torch.Tensor]:
     """Split text into token chunks without breaking words."""
     words = text.split()
     segments: list[str] = []
@@ -143,7 +143,7 @@ def main():
     parser.add_argument(
         "--segment",
         action="store_true",
-        help="Segment prompts every 30 tokens",
+        help="Segment prompts every 50 tokens",
     )
     parser.add_argument(
         "--max_tokens",
@@ -237,7 +237,7 @@ def main():
         segment_choice = True
     else:
         segment_choice = (
-            input("Segment prompts every 30 tokens? (y/N): ").strip().lower()
+            input("Segment prompts every 50 tokens? (y/N): ").strip().lower()
             == "y"
         )
 

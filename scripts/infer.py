@@ -32,7 +32,7 @@ def load_model(model_name, lora_path=None):
     return model, tokenizer
 
 
-def split_prompt_by_tokens(text: str, tokenizer, chunk_size: int = 30) -> list[torch.Tensor]:
+def split_prompt_by_tokens(text: str, tokenizer, chunk_size: int = 50) -> list[torch.Tensor]:
     """Split text into token chunks without breaking words."""
     words = text.split()
     segments: list[str] = []
@@ -122,7 +122,7 @@ def main():
     parser = argparse.ArgumentParser(description='Interactive Orpheus TTS inference')
     parser.add_argument('--model', default='unsloth/orpheus-3b-0.1-ft', help='Model name or path')
     parser.add_argument('--lora', default='lora_model', help='Path to trained LoRA adapters')
-    parser.add_argument('--segment', action='store_true', help='Segment prompts every 30 tokens')
+    parser.add_argument('--segment', action='store_true', help='Segment prompts every 50 tokens')
     parser.add_argument(
         '--max_tokens',
         type=int,

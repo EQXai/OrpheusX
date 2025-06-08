@@ -352,7 +352,7 @@ def get_snac_model():
     return _SNAC_MODEL
 
 
-def split_prompt_by_tokens(text: str, tokenizer, chunk_size: int = 30) -> list[torch.Tensor]:
+def split_prompt_by_tokens(text: str, tokenizer, chunk_size: int = 50) -> list[torch.Tensor]:
     """Split text into token chunks without cutting words."""
     words = text.split()
     segments: list[str] = []
@@ -576,7 +576,7 @@ with gr.Blocks() as demo:
             top_p = gr.Slider(0.5, 1.0, value=0.95, label="Top P")
             rep_penalty = gr.Slider(1.0, 2.0, value=1.1, label="Repetition Penalty")
             max_tokens = gr.Number(value=1200, precision=0, label="Max New Tokens")
-            segment_chk = gr.Checkbox(label="Segment text by 30 tokens")
+            segment_chk = gr.Checkbox(label="Segment text by 50 tokens")
         infer_btn = gr.Button("Generate")
         clear_btn = gr.Button("Clear Gallery")
         gallery = gr.HTML(label="Outputs")

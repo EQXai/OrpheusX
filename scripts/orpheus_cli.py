@@ -46,7 +46,7 @@ def train():
 
 def infer():
     multi = input("Run inference on multiple models? (y/N): ").strip().lower() == "y"
-    segment = input("Segment prompts every 30 tokens? (y/N): ").strip().lower() == "y"
+    segment = input("Segment prompts every 50 tokens? (y/N): ").strip().lower() == "y"
     cmd = ["python", "infer_interactive.py"]
     if segment:
         cmd.append("--segment")
