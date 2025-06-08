@@ -94,10 +94,13 @@ def ffmpeg_cut(
     # Save the standardized audio as the final WAV file
     sf.write(output_wav_file, audio, sr)
 
-def split_text_to_tokens(text, max_tokens=50):
-    """Splits a text into subsegments of less than max_tokens, including special tokens."""
+def split_text_to_tokens(text, max_tokens=None):
+    """Splits ``text`` into subsegments of at most ``max_tokens`` tokens.
+
+    If ``max_tokens`` is ``None``, the text is returned as a single segment.
+    """
     tokens = tokenizer(text, add_special_tokens=True)["input_ids"]
-    if len(tokens) <= max_tokens:
+    if max_tokens is None or len(tokens) <= max_tokens:
         return [(text, len(tokens))]
 
     words = text.split()
@@ -134,15 +137,16 @@ def segment_audio(
     output_dir,
     min_len=15.0,
     max_len=25.0,
-    max_tokens=50,
+    max_tokens=None,
+
     target_samples=None,
 ):
     """Cut ``audio_path`` into smaller clips based on WhisperX segments.
 
     Segments are combined so each audio clip lasts between ``min_len`` and
-    ``max_len`` seconds when possible. Long segments are broken down by token
-    count, and boundaries are always placed on word edges so that the audio and
-    text match exactly.
+    ``max_len`` seconds when possible. If ``max_tokens`` is specified, long
+    segments are further broken down based on token count. Boundaries are always
+    placed on word edges so that the audio and text match exactly.
     """
     with open(json_file, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -209,7 +213,7 @@ def segment_audio(
             new_len = sub_end - chunk_start
 
             if chunk and (
-                new_token_count > max_tokens
+                (max_tokens is not None and new_token_count > max_tokens)
                 or new_len > max_len
                 or new_len >= target_len
             ):
