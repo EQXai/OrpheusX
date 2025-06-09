@@ -69,6 +69,28 @@ def update_logs() -> str:
     return read_logs()
 
 
+def get_system_info() -> str:
+    """Return formatted device and model info."""
+    if torch.cuda.is_available():
+        device = torch.cuda.get_device_name(0)
+    else:
+        device = platform.processor() or "CPU"
+    return f"**Device:** {device}  \n**Model:** {MODEL_NAME}"
+
+
+def read_logs(lines: int = 15) -> str:
+    """Return the last few lines from the log file."""
+    if LOG_FILE.is_file():
+        data = LOG_FILE.read_text(encoding="utf-8").splitlines()[-lines:]
+        return "\n".join(data)
+    return ""
+
+
+def update_logs() -> str:
+    """Helper for gradio to refresh log panel."""
+    return read_logs()
+
+
 def list_datasets() -> list[str]:
     if not DATASETS_DIR.is_dir():
         return []
@@ -910,6 +932,7 @@ with gr.Blocks(css=GLOBAL_CSS) as demo:
             label="Dataset Name (for upload)",
             **info_kwargs("Name for new dataset"),
         )
+
         segment_tokens = gr.Number(value=50, precision=0, label="Max tokens per segment", visible=False)
         segment_duration = gr.Number(value=0, precision=1, label="Min seconds per segment", visible=False)
         model_max_len = gr.Number(value=2048, precision=0, label="Model max length", visible=False)
@@ -943,6 +966,7 @@ with gr.Blocks(css=GLOBAL_CSS) as demo:
             label="Local dataset(s)",
             **info_kwargs("Datasets prepared locally"),
         )
+
         model_max_len_train = gr.Number(value=2048, precision=0, label="Model max length", visible=False)
         with gr.Accordion("Ajustes avanzados", open=False):
             batch_size = gr.Number(value=1, precision=0, label="Batch size")
