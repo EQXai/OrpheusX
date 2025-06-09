@@ -12,6 +12,7 @@ from pathlib import Path
 import json
 import re
 import gradio as gr
+import gc
 
 # Helper for audio concatenation with crossfade
 from audio_utils import concat_with_fade
@@ -514,15 +515,20 @@ def generate_audio(
         print_segment_log(text, seg_text)
     else:
         segments = [tokenizer(text, return_tensors='pt').input_ids.squeeze(0)]
-    audio_parts = [
-        generate_audio_segment(s, model, snac_model, max_new_tokens=max_new_tokens)
-        for s in segments
-    ]
+    audio_parts = []
+    for s in segments:
+        audio_parts.append(
+            generate_audio_segment(s, model, snac_model, max_new_tokens=max_new_tokens)
+        )
+        torch.cuda.empty_cache()
+        gc.collect()
     final_audio = concat_with_fade(audio_parts)
     lora_name = lora_name or "base_model"
     path = get_output_path(lora_name)
     import torchaudio
     torchaudio.save(str(path), final_audio.detach().cpu(), 24000)
+    torch.cuda.empty_cache()
+    gc.collect()
     return str(path)
 
 
@@ -558,6 +564,8 @@ def generate_batch(
                 segment,
                 segment_by,
             )
+            torch.cuda.empty_cache()
+            gc.collect()
             caption = f"{lora or 'base'}: {text}"[:60]
             results.append((path, caption))
             last_path = path

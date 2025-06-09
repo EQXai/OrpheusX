@@ -12,6 +12,7 @@ import argparse
 import torch
 import torchaudio
 import re
+import gc
 from unsloth import FastLanguageModel
 from snac import SNAC
 from peft import PeftModel
@@ -309,16 +310,21 @@ def main():
                 print_segment_log(text, seg_text)
             else:
                 segments = [tokenizer(text, return_tensors="pt").input_ids.squeeze(0)]
-            audio_parts = [
-                generate_audio_segment(
-                    ids, model, snac_model, max_new_tokens=args.max_tokens
+            audio_parts = []
+            for ids in segments:
+                audio_parts.append(
+                    generate_audio_segment(
+                        ids, model, snac_model, max_new_tokens=args.max_tokens
+                    )
                 )
-                for ids in segments
-            ]
+                torch.cuda.empty_cache()
+                gc.collect()
             final_audio = concat_with_fade(audio_parts)
             path = get_output_path(lora_choice or "base_model")
             torchaudio.save(path, final_audio.detach().cpu(), 24000)
             print(f"Audio written to {path}")
+            torch.cuda.empty_cache()
+            gc.collect()
 
 if __name__ == '__main__':
     main()
