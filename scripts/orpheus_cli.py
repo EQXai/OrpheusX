@@ -23,8 +23,9 @@ def install():
 
 def create_dataset():
     multi = input("Create datasets in batch? (y/N): ").strip().lower() == "y"
+    cmd = ["python", "prepare_dataset_interactive.py"]
     while True:
-        run_script(["python", "prepare_dataset_interactive.py"])
+        run_script(cmd)
         if not multi:
             break
         again = input("Create another dataset? (y/N): ").strip().lower()
@@ -45,8 +46,12 @@ def train():
 
 def infer():
     multi = input("Run inference on multiple models? (y/N): ").strip().lower() == "y"
+    segment = input("Segment prompts every 50 tokens? (y/N): ").strip().lower() == "y"
+    cmd = ["python", "infer_interactive.py"]
+    if segment:
+        cmd.append("--segment")
     while True:
-        run_script(["python", "infer_interactive.py"])
+        run_script(cmd)
         if not multi:
             break
         again = input("Run inference with another model? (y/N): ").strip().lower()
