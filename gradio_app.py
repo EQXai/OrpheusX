@@ -14,6 +14,7 @@ import re
 import gradio as gr
 import gc
 import time
+from tools.logger_utils import get_logger
 
 # Helper for audio concatenation with crossfade
 from audio_utils import concat_with_fade
@@ -28,6 +29,8 @@ LORA_DIR = REPO_ROOT / "scripts" / "lora_models"
 PROMPT_LIST_DIR = REPO_ROOT / "prompt_list"
 SOURCE_AUDIO_DIR = REPO_ROOT / "source_audio"
 MAX_PROMPTS = 5
+
+logger = get_logger("gradio_app")
 
 
 def list_datasets() -> list[str]:
@@ -74,9 +77,11 @@ def prepare_datasets_ui(
         return "No audio selected."
 
     msgs = []
+    logger.info("Preparing %d dataset(s)", len(tasks))
     total = len(tasks)
     progress = gr.Progress()
     for idx, (audio_path, ds_name) in enumerate(tasks, start=1):
+        start = time.perf_counter()
         progress((idx - 1) / total, desc=f"Preparing {ds_name}...")
         out_dir = DATASETS_DIR / ds_name
         out_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -86,7 +91,11 @@ def prepare_datasets_ui(
                 str(out_dir),
             )
             msgs.append(f"{ds_name}: success")
+            elapsed = time.perf_counter() - start
+            logger.info("%s prepared in %.2fs", ds_name, elapsed)
         except Exception as e:  # pragma: no cover - best effort
+            elapsed = time.perf_counter() - start
+            logger.exception("Error preparing %s after %.2fs", ds_name, elapsed)
             msgs.append(f"{ds_name}: failed ({e})")
         progress(idx / total)
     return "\n".join(msgs)
@@ -111,6 +120,8 @@ def train_lora_single(
     is_local: bool,
 ) -> str:
     """Train a single LoRA on a dataset."""
+    logger.info("Training LoRA %s from %s", lora_name, dataset_source)
+    start_time = time.perf_counter()
     if is_local:
         dataset = load_from_disk(dataset_source)
     else:
@@ -265,6 +276,8 @@ def train_lora_single(
 
     model.save_pretrained(save_dir)
     tokenizer.save_pretrained(save_dir)
+    elapsed = time.perf_counter() - start_time
+    logger.info("LoRA %s trained in %.2fs", lora_name, elapsed)
     return f"LoRA saved under {save_dir.resolve()}"
 
 
@@ -281,13 +294,19 @@ def train_loras(hf_links: str, local_datasets: list[str]) -> str:
         return "No datasets selected."
     msgs = []
     total = len(dataset_info)
+    logger.info("Training %d LoRA(s)", total)
     progress = gr.Progress()
     for idx, (src, name, is_local) in enumerate(dataset_info, start=1):
         progress((idx - 1) / total, desc=f"Training {name}...")
+        start = time.perf_counter()
         try:
             msg = train_lora_single(src, name, is_local)
             msgs.append(f"{name}: success")
+            elapsed = time.perf_counter() - start
+            logger.info("%s trained in %.2fs", name, elapsed)
         except Exception as e:  # pragma: no cover - best effort
+            elapsed = time.perf_counter() - start
+            logger.exception("Training failed for %s after %.2fs", name, elapsed)
             msgs.append(f"{name}: failed ({e})")
     progress(1)
     return "\n".join(msgs)
@@ -383,12 +402,12 @@ def split_prompt_by_tokens(
 
 def print_segment_log(prompt: str, segments: list[str]) -> None:
     """Print segment boundaries for a prompt."""
-    print("Segmentation log:")
+    logger.info("Segmentation log:")
     offset = 0
     for idx, seg in enumerate(segments, 1):
         start = prompt.find(seg, offset)
         end = start + len(seg)
-        print(f"{idx}: chars {start}-{end}: {seg}")
+        logger.info("%d: chars %d-%d: %s", idx, start, end, seg)
         offset = end
 
 
@@ -430,6 +449,8 @@ def generate_audio_segment(
     snac_model,
     max_new_tokens: int = 1200,
 ) -> torch.Tensor:
+    logger.info("Generating segment with %d tokens", tokens.numel())
+    t0 = time.perf_counter()
     start_token = torch.tensor([[128259]], dtype=torch.int64)
     end_tokens = torch.tensor([[128009, 128260]], dtype=torch.int64)
     modified_input = torch.cat([start_token, tokens.unsqueeze(0), end_tokens], dim=1)
@@ -448,6 +469,7 @@ def generate_audio_segment(
         eos_token_id=128258,
         use_cache=True,
     )
+    logger.info("Model.generate finished in %.2fs", time.perf_counter() - t0)
     token_to_find = 128257
     token_to_remove = 128258
     token_indices = (generated == token_to_find).nonzero(as_tuple=True)
@@ -508,6 +530,8 @@ def generate_audio(
 
     snac_model = get_snac_model()
 
+    token_count = len(tokenizer(text, add_special_tokens=False).input_ids)
+    logger.info("Generating audio (%d tokens) using %s", token_count, lora_name or "base_model")
     start_time = time.perf_counter()
     if segment:
         if segment_by == "sentence":
@@ -515,8 +539,12 @@ def generate_audio(
         else:
             seg_text, segments = split_prompt_by_tokens(text, tokenizer, return_text=True)
         print_segment_log(text, seg_text)
+        for i, seg in enumerate(segments, 1):
+            logger.info("Segment %d tokens: %d", i, seg.numel())
     else:
-        segments = [tokenizer(text, return_tensors='pt').input_ids.squeeze(0)]
+        single = tokenizer(text, return_tensors='pt').input_ids.squeeze(0)
+        logger.info("Single segment tokens: %d", single.numel())
+        segments = [single]
     final_audio = None
     for s in segments:
         part = generate_audio_segment(
@@ -533,13 +561,14 @@ def generate_audio(
     elapsed = time.perf_counter() - start_time
     duration = final_audio.shape[-1] / 24000
     rate = elapsed / duration if duration else 0.0
-    print(f"Inference time: {elapsed:.2f}s ({rate:.2f}s per generated second)")
+    logger.info("Inference time: %.2fs (%.2fs per generated second)", elapsed, rate)
     lora_name = lora_name or "base_model"
     path = get_output_path(lora_name)
     import torchaudio
     torchaudio.save(str(path), final_audio.detach().cpu(), 24000)
     torch.cuda.empty_cache()
     gc.collect()
+    logger.info("Saved audio to %s", path)
     return str(path)
 
 
@@ -565,6 +594,7 @@ def generate_batch(
     for lora in loras:
         for text in prompts:
             progress(step / total, desc=f"Generating {lora or 'base'}...")
+            logger.info("Generating prompt '%s' with lora '%s'", text, lora or 'base_model')
             path = generate_audio(
                 text,
                 None if lora == "<base>" else lora,
@@ -648,12 +678,36 @@ with gr.Blocks() as demo:
         prompt_list_dd = gr.Dropdown(choices=prompt_files, label="Prompt list", visible=False)
         lora_used = gr.Dropdown(choices=["<base>"] + lora_choices, multiselect=True, label="LoRA(s)")
         with gr.Accordion("Advanced Settings", open=False):
+            profile_sel = gr.Radio(
+                ["Short Audio", "Long Audio"],
+                value="Short Audio",
+                label="Preset",
+            )
             temperature = gr.Slider(0.1, 1.5, value=0.6, label="Temperature")
             top_p = gr.Slider(0.5, 1.0, value=0.95, label="Top P")
             rep_penalty = gr.Slider(1.0, 2.0, value=1.1, label="Repetition Penalty")
             max_tokens = gr.Number(value=1200, precision=0, label="Max New Tokens")
             segment_chk = gr.Checkbox(label="Segment text")
             segment_method = gr.Radio(["tokens", "sentence"], value="tokens", label="Segment by")
+
+            def apply_profile(preset):
+                if preset == "Long Audio":
+                    return (
+                        gr.update(value=2400),
+                        gr.update(value=True),
+                        gr.update(value="sentence"),
+                    )
+                return (
+                    gr.update(value=1200),
+                    gr.update(value=False),
+                    gr.update(value="tokens"),
+                )
+
+            profile_sel.change(
+                apply_profile,
+                profile_sel,
+                [max_tokens, segment_chk, segment_method],
+            )
         infer_btn = gr.Button("Generate")
         clear_btn = gr.Button("Clear Gallery")
         gallery = gr.HTML(label="Outputs")
