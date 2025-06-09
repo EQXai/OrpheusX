@@ -60,6 +60,17 @@ python scripts/orpheus_cli.py
 - Train LoRA models
 - Run inference
 - Each audio clip aligns exactly with its transcript while staying in the 15–25 second range.
+- Datasets are saved under `datasets/<name>` and include a standalone `dataset.parquet` file
+- Batch options let you process multiple datasets or LoRAs in one go
+- Training can load a local dataset or a Hugging Face link
+- Inference results are written to `audio_output/<lora_name>/` with incrementing filenames
+- Prompt lists in `prompt_list/` can be loaded for batch generation
+- Use `<laugh>`, `<chuckle>`, `<sigh>`, `<cough>`, `<sniffle>`, `<groan>`, `<yawn>`, `<gasp>` for preset expressions
+- When prompts are segmented, pieces are joined with a short crossfade for smooth audio
+- Verify your environment with `python scripts/check_env.py` (checks packages, CUDA and ffmpeg)
+- The dataset helper lists audio files from `source_audio/` so you can pick them interactively
+- Segmentation mode prints the start and end index of each chunk so you know where text was split
+- Trained LoRA adapters are stored under `scripts/lora_models/<dataset>/lora_model`
 
 All features are available via an interactive command-line menu.
 
@@ -91,4 +102,8 @@ When splitting by sentences, commas are also considered separators. The
 algorithm ignores consecutive commas and merges pieces shorter than three words
 with their neighbors so lists or short phrases aren't broken awkwardly. Enable
 sentence segmentation for long prompts with natural pause points.
+
+While generating audio, the CLI prints a segmentation log showing where each
+chunk starts and ends. After all segments are generated they are automatically
+crossfaded to hide the cuts.
 
