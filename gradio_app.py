@@ -413,10 +413,31 @@ def get_snac_model():
     return _SNAC_MODEL
 
 
+def _merge_short_segments(
+    texts: list[str],
+    tokens: list[torch.Tensor],
+    min_tokens: int,
+) -> tuple[list[str], list[torch.Tensor]]:
+    """Merge segments shorter than ``min_tokens`` with the previous one."""
+    if min_tokens <= 0:
+        return texts, tokens
+    merged_texts: list[str] = []
+    merged_tokens: list[torch.Tensor] = []
+    for t_text, t_tokens in zip(texts, tokens):
+        if merged_tokens and t_tokens.numel() < min_tokens:
+            merged_texts[-1] = merged_texts[-1] + " " + t_text
+            merged_tokens[-1] = torch.cat([merged_tokens[-1], t_tokens])
+        else:
+            merged_texts.append(t_text)
+            merged_tokens.append(t_tokens)
+    return merged_texts, merged_tokens
+
+
 def split_prompt_by_tokens(
     text: str,
     tokenizer,
-    chunk_size: int = 50,
+    max_tokens: int = 50,
+    min_tokens: int = 0,
     return_text: bool = False,
 ) -> list[torch.Tensor] | tuple[list[str], list[torch.Tensor]]:
     """Split text into token chunks without cutting words."""
@@ -426,7 +447,7 @@ def split_prompt_by_tokens(
     token_len = 0
     for w in words:
         n_tokens = len(tokenizer(w, add_special_tokens=False).input_ids)
-        if token_len + n_tokens > chunk_size and current:
+        if token_len + n_tokens > max_tokens and current:
             segments.append(" ".join(current))
             current = [w]
             token_len = n_tokens
@@ -436,6 +457,7 @@ def split_prompt_by_tokens(
     if current:
         segments.append(" ".join(current))
     token_segments = [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
+    segments, token_segments = _merge_short_segments(segments, token_segments, min_tokens)
     return (segments, token_segments) if return_text else token_segments
 
 
@@ -453,28 +475,48 @@ def print_segment_log(prompt: str, segments: list[str]) -> None:
 def split_prompt_full(
     text: str,
     tokenizer,
+    chars: list[str] | None = None,
+    max_tokens: int = 50,
+    min_tokens: int = 0,
     return_text: bool = False,
 ) -> list[torch.Tensor] | tuple[list[str], list[torch.Tensor]]:
-    """Split ``text`` at every comma, period, question mark or exclamation point."""
-    parts = [
-        p.strip()
-        for p in re.findall(r"[^,.!?]+(?:[,.!?]+|$)", text.strip())
-        if p.strip()
-    ]
-    token_segments = [
-        tokenizer(p, return_tensors="pt").input_ids.squeeze(0) for p in parts
-    ]
-    return (parts, token_segments) if return_text else token_segments
+    """Split ``text`` at selected punctuation marks."""
+    if not chars:
+        chars = [",", ".", "?", "!"]
+    char_class = "".join(re.escape(c) for c in chars)
+    pattern = rf"[^{char_class}]+(?:[{char_class}]+|$)"
+    parts = [p.strip() for p in re.findall(pattern, text.strip()) if p.strip()]
+    segments: list[str] = []
+    current: list[str] = []
+    for part in parts:
+        candidate = " ".join(current + [part])
+        token_len = len(tokenizer(candidate, add_special_tokens=False).input_ids)
+        if token_len > max_tokens and current:
+            segments.append(" ".join(current))
+            current = [part]
+        else:
+            current.append(part)
+    if current:
+        segments.append(" ".join(current))
+    token_segments = [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
+    segments, token_segments = _merge_short_segments(segments, token_segments, min_tokens)
+    return (segments, token_segments) if return_text else token_segments
 
 
 def split_prompt_by_sentences(
     text: str,
     tokenizer,
-    chunk_size: int = 50,
+    chars: list[str] | None = None,
+    max_tokens: int = 50,
+    min_tokens: int = 0,
     return_text: bool = False,
 ) -> list[torch.Tensor] | tuple[list[str], list[torch.Tensor]]:
-    """Split text into sentence groups not exceeding ``chunk_size`` tokens."""
-    raw_parts = [s.strip() for s in re.split(r"(?<=[.!?,])\s+", text.strip()) if s.strip()]
+    """Split text into sentence groups within a token range."""
+    if not chars:
+        chars = [",", ".", "?", "!"]
+    char_class = "".join(re.escape(c) for c in chars)
+    pattern = rf"(?<=[{char_class}])\s+"
+    raw_parts = [s.strip() for s in re.split(pattern, text.strip()) if s.strip()]
     sentences: list[str] = []
     for part in raw_parts:
         if sentences:
@@ -488,7 +530,7 @@ def split_prompt_by_sentences(
     for sent in sentences:
         candidate = " ".join(current + [sent])
         token_len = len(tokenizer(candidate, add_special_tokens=False).input_ids)
-        if token_len > chunk_size and current:
+        if token_len > max_tokens and current:
             segments.append(" ".join(current))
             current = [sent]
         else:
@@ -496,6 +538,7 @@ def split_prompt_by_sentences(
     if current:
         segments.append(" ".join(current))
     token_segments = [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
+    segments, token_segments = _merge_short_segments(segments, token_segments, min_tokens)
     return (segments, token_segments) if return_text else token_segments
 
 
@@ -577,6 +620,9 @@ def generate_audio(
     max_new_tokens: int = 1200,
     segment: bool = False,
     segment_by: str = "tokens",
+    seg_chars: list[str] | None = None,
+    seg_min_tokens: int = 0,
+    seg_max_tokens: int = 50,
 ) -> str:
     model_name = MODEL_NAME
     lora_path = None
@@ -591,11 +637,31 @@ def generate_audio(
     start_time = time.perf_counter()
     if segment:
         if segment_by == "sentence":
-            seg_text, segments = split_prompt_by_sentences(text, tokenizer, return_text=True)
+            seg_text, segments = split_prompt_by_sentences(
+                text,
+                tokenizer,
+                chars=seg_chars,
+                max_tokens=seg_max_tokens,
+                min_tokens=seg_min_tokens,
+                return_text=True,
+            )
         elif segment_by == "full_segment":
-            seg_text, segments = split_prompt_full(text, tokenizer, return_text=True)
+            seg_text, segments = split_prompt_full(
+                text,
+                tokenizer,
+                chars=seg_chars,
+                max_tokens=seg_max_tokens,
+                min_tokens=seg_min_tokens,
+                return_text=True,
+            )
         else:
-            seg_text, segments = split_prompt_by_tokens(text, tokenizer, return_text=True)
+            seg_text, segments = split_prompt_by_tokens(
+                text,
+                tokenizer,
+                max_tokens=seg_max_tokens,
+                min_tokens=seg_min_tokens,
+                return_text=True,
+            )
         print_segment_log(text, seg_text)
         for i, seg in enumerate(segments, 1):
             logger.info("Segment %d tokens: %d", i, seg.numel())
@@ -639,6 +705,9 @@ def generate_batch(
     max_new_tokens: int,
     segment: bool,
     segment_by: str,
+    seg_chars: list[str] | None,
+    seg_min_tokens: int,
+    seg_max_tokens: int,
 ) -> tuple[str, str]:
     """Generate audio for multiple prompts/LORAs."""
     if not prompts:
@@ -662,6 +731,9 @@ def generate_batch(
                 max_new_tokens,
                 segment,
                 segment_by,
+                seg_chars,
+                seg_min_tokens,
+                seg_max_tokens,
             )
             torch.cuda.empty_cache()
             gc.collect()
@@ -779,6 +851,17 @@ with gr.Blocks() as demo:
                 "sentence",
                 "full_segment",
             ], value="tokens", label="Segment by")
+            segment_chars = gr.CheckboxGroup(
+                [",", ".", "?", "!"],
+                value=[",", ".", "?", "!"],
+                label="Segment characters",
+            )
+            seg_min_tokens = gr.Number(
+                value=0, precision=0, label="Min tokens per segment"
+            )
+            seg_max_tokens = gr.Number(
+                value=50, precision=0, label="Max tokens per segment"
+            )
 
             def apply_profile(preset):
                 if preset == "Long Audio":
@@ -786,17 +869,30 @@ with gr.Blocks() as demo:
                         gr.update(value=2400),
                         gr.update(value=True),
                         gr.update(value="sentence"),
+                        gr.update(value=[",", ".", "?", "!"]),
+                        gr.update(value=0),
+                        gr.update(value=50),
                     )
                 return (
                     gr.update(value=1200),
                     gr.update(value=False),
                     gr.update(value="tokens"),
+                    gr.update(value=[",", ".", "?", "!"]),
+                    gr.update(value=0),
+                    gr.update(value=50),
                 )
 
             profile_sel.change(
                 apply_profile,
                 profile_sel,
-                [max_tokens, segment_chk, segment_method],
+                [
+                    max_tokens,
+                    segment_chk,
+                    segment_method,
+                    segment_chars,
+                    seg_min_tokens,
+                    seg_max_tokens,
+                ],
             )
         infer_btn = gr.Button("Generate")
         clear_btn = gr.Button("Clear Gallery")
@@ -835,6 +931,9 @@ with gr.Blocks() as demo:
             max_tokens = int(args[MAX_PROMPTS + 5])
             segment = args[MAX_PROMPTS + 6]
             seg_method = args[MAX_PROMPTS + 7]
+            seg_chars = args[MAX_PROMPTS + 8] or []
+            seg_min = int(args[MAX_PROMPTS + 9] or 0)
+            seg_max = int(args[MAX_PROMPTS + 10] or 50)
             return generate_batch(
                 prompts,
                 loras,
@@ -844,6 +943,9 @@ with gr.Blocks() as demo:
                 max_tokens,
                 segment,
                 seg_method,
+                seg_chars,
+                seg_min,
+                seg_max,
             )
 
         infer_btn.click(
@@ -860,6 +962,9 @@ with gr.Blocks() as demo:
                 max_tokens,
                 segment_chk,
                 segment_method,
+                segment_chars,
+                seg_min_tokens,
+                seg_max_tokens,
             ],
             [gallery, last_audio],
         )
