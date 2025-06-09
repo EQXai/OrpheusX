@@ -13,6 +13,7 @@ import torch
 import torchaudio
 import re
 import gc
+import time
 from unsloth import FastLanguageModel
 from snac import SNAC
 from peft import PeftModel
@@ -310,6 +311,7 @@ def main():
                 print_segment_log(text, seg_text)
             else:
                 segments = [tokenizer(text, return_tensors="pt").input_ids.squeeze(0)]
+            start_time = time.perf_counter()
             final_audio = None
             for ids in segments:
                 part = generate_audio_segment(
@@ -323,6 +325,12 @@ def main():
                 gc.collect()
             if final_audio is None:
                 continue
+            elapsed = time.perf_counter() - start_time
+            duration = final_audio.shape[-1] / 24000
+            rate = elapsed / duration if duration else 0.0
+            print(
+                f"Inference time: {elapsed:.2f}s ({rate:.2f}s per generated second)"
+            )
             path = get_output_path(lora_choice or "base_model")
             torchaudio.save(path, final_audio.detach().cpu(), 24000)
             print(f"Audio written to {path}")

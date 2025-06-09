@@ -13,6 +13,7 @@ import json
 import re
 import gradio as gr
 import gc
+import time
 
 # Helper for audio concatenation with crossfade
 from audio_utils import concat_with_fade
@@ -507,6 +508,7 @@ def generate_audio(
 
     snac_model = get_snac_model()
 
+    start_time = time.perf_counter()
     if segment:
         if segment_by == "sentence":
             seg_text, segments = split_prompt_by_sentences(text, tokenizer, return_text=True)
@@ -528,6 +530,10 @@ def generate_audio(
         gc.collect()
     if final_audio is None:
         return ""
+    elapsed = time.perf_counter() - start_time
+    duration = final_audio.shape[-1] / 24000
+    rate = elapsed / duration if duration else 0.0
+    print(f"Inference time: {elapsed:.2f}s ({rate:.2f}s per generated second)")
     lora_name = lora_name or "base_model"
     path = get_output_path(lora_name)
     import torchaudio
