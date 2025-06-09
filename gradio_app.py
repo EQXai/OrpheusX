@@ -14,9 +14,12 @@ import re
 import unsloth  # must be imported before transformers
 from transformers import AutoTokenizer
 import gradio as gr
+import inspect
 import gc
 import time
-from tools.logger_utils import get_logger
+from tools.logger_utils import get_logger, LOG_FILE
+import platform
+import torch
 
 # Helper for audio concatenation with crossfade
 from audio_utils import concat_with_fade
@@ -33,6 +36,37 @@ SOURCE_AUDIO_DIR = REPO_ROOT / "source_audio"
 MAX_PROMPTS = 5
 
 logger = get_logger("gradio_app")
+
+# Certain versions of gradio support an "info" parameter for components.
+# Check once so we can gracefully degrade if unavailable.
+INFO_SUPPORTED = "info" in inspect.signature(gr.Textbox.__init__).parameters
+
+
+def info_kwargs(text: str) -> dict:
+    """Return a dictionary with "info" if supported."""
+    return {"info": text} if INFO_SUPPORTED else {}
+
+
+def get_system_info() -> str:
+    """Return formatted device and model info."""
+    if torch.cuda.is_available():
+        device = torch.cuda.get_device_name(0)
+    else:
+        device = platform.processor() or "CPU"
+    return f"**Device:** {device}  \n**Model:** {MODEL_NAME}"
+
+
+def read_logs(lines: int = 15) -> str:
+    """Return the last few lines from the log file."""
+    if LOG_FILE.is_file():
+        data = LOG_FILE.read_text(encoding="utf-8").splitlines()[-lines:]
+        return "\n".join(data)
+    return ""
+
+
+def update_logs() -> str:
+    """Helper for gradio to refresh log panel."""
+    return read_logs()
 
 
 def list_datasets() -> list[str]:
@@ -842,33 +876,73 @@ def refresh_lists() -> tuple:
         gr.update(choices=list_source_audio()),
     )
 
-with gr.Blocks() as demo:
-    gr.Markdown("# OrpheusX Gradio Interface")
+GLOBAL_CSS = """
+<style>
+body{background:#111;color:#eee;font-family:Helvetica,Arial,sans-serif;}
+.gradio-container{background:#111;color:#eee;}
+h1,h2,h3{color:#f80;}
+.gr-button{background:#222;border-radius:6px;color:#eee;border:none;}
+.gr-button:hover{background:#f80;color:#000;}
+a{color:#f80;}
+.spinner{border:4px solid #333;border-top:4px solid #f80;border-radius:50%;width:32px;height:32px;animation:spin 1s linear infinite;margin:auto;}
+@keyframes spin{0%{transform:rotate(0deg);}100%{transform:rotate(360deg);}}
+.header{text-align:center;font-size:2.5em;padding:0.5em;color:#f80;}
+</style>
+"""
+
+with gr.Blocks(css=GLOBAL_CSS) as demo:
+    gr.HTML("<div class='header'>\uD83C\uDFB5 OrpheusX</div>")
+    spinner = gr.HTML("<div class='spinner'></div>", visible=False)
 
     refresh_btn = gr.Button("Refresh directories")
 
     with gr.Tab("Prepare Dataset"):
-        audio_input = gr.Audio(type="filepath", label="Upload audio")
-        local_audio = gr.Dropdown(choices=list_source_audio(), multiselect=True, label="Existing audio file(s)")
-        dataset_name = gr.Textbox(label="Dataset Name (for upload)")
+        gr.Markdown("Upload or select audio files to build a training dataset.")
+        audio_input = gr.Audio(type="filepath", label="Upload audio", **info_kwargs("WAV or MP3 file"))
+        local_audio = gr.Dropdown(
+            choices=list_source_audio(),
+            multiselect=True,
+            label="Existing audio file(s)",
+            **info_kwargs("Select from source_audio"),
+        )
+        local_preview = gr.Audio(label="Preview", interactive=False, visible=False)
+        dataset_name = gr.Textbox(
+            label="Dataset Name (for upload)",
+            **info_kwargs("Name for new dataset"),
+        )
         segment_tokens = gr.Number(value=50, precision=0, label="Max tokens per segment", visible=False)
         segment_duration = gr.Number(value=0, precision=1, label="Min seconds per segment", visible=False)
         model_max_len = gr.Number(value=2048, precision=0, label="Model max length", visible=False)
         prepare_btn = gr.Button("Prepare")
         prepare_output = gr.Textbox()
-        prepare_btn.click(
+
+        def _preview_audio(files):
+            if not files:
+                return gr.update(visible=False, value=None)
+            path = SOURCE_AUDIO_DIR / files[0]
+            return gr.update(value=str(path), visible=True)
+
+        local_audio.change(_preview_audio, local_audio, local_preview)
+        prepare_event = prepare_btn.click(
+            lambda: gr.update(visible=True), None, spinner, queue=False
+        ).then(
             prepare_datasets_ui,
-            [
-                audio_input,
-                dataset_name,
-                local_audio,
-            ],
+            [audio_input, dataset_name, local_audio],
             prepare_output,
-        )
+        ).then(lambda: gr.update(visible=False), None, spinner, queue=False)
 
     with gr.Tab("Train LoRA"):
-        hf_input = gr.Textbox(label="HF dataset link (one per line)")
-        local_ds = gr.Dropdown(choices=dataset_choices, multiselect=True, label="Local dataset(s)")
+        gr.Markdown("Train a LoRA model using prepared datasets.")
+        hf_input = gr.Textbox(
+            label="HF dataset link (one per line)",
+            **info_kwargs("Hugging Face dataset URLs"),
+        )
+        local_ds = gr.Dropdown(
+            choices=dataset_choices,
+            multiselect=True,
+            label="Local dataset(s)",
+            **info_kwargs("Datasets prepared locally"),
+        )
         model_max_len_train = gr.Number(value=2048, precision=0, label="Model max length", visible=False)
         with gr.Accordion("Ajustes avanzados", open=False):
             batch_size = gr.Number(value=1, precision=0, label="Batch size")
@@ -883,7 +957,9 @@ with gr.Blocks() as demo:
             scheduler = gr.Textbox(value="linear", label="LR scheduler type")
         train_btn = gr.Button("Train")
         train_output = gr.Textbox()
-        train_btn.click(
+        train_event = train_btn.click(
+            lambda: gr.update(visible=True), None, spinner, queue=False
+        ).then(
             train_loras,
             [
                 hf_input,
@@ -900,14 +976,32 @@ with gr.Blocks() as demo:
                 scheduler,
             ],
             train_output,
-        )
+        ).then(lambda: gr.update(visible=False), None, spinner, queue=False)
 
     with gr.Tab("Inference"):
+        gr.Markdown("Generate speech from a prompt using selected LoRAs.")
         mode = gr.Radio(["Manual", "Prompt List"], value="Manual", label="Prompt source")
         num_prompts = gr.Number(value=1, precision=0, label="Number of prompts")
-        prompt_boxes = [gr.Textbox(label=f"Prompt {i+1}", visible=(i == 0)) for i in range(MAX_PROMPTS)]
-        prompt_list_dd = gr.Dropdown(choices=prompt_files, label="Prompt list", visible=False)
-        lora_used = gr.Dropdown(choices=["<base>"] + lora_choices, multiselect=True, label="LoRA(s)")
+        prompt_boxes = [
+            gr.Textbox(
+                label=f"Prompt {i+1}",
+                visible=(i == 0),
+                **info_kwargs("Text description"),
+            )
+            for i in range(MAX_PROMPTS)
+        ]
+        prompt_list_dd = gr.Dropdown(
+            choices=prompt_files,
+            label="Prompt list",
+            visible=False,
+            **info_kwargs("JSON list of prompts"),
+        )
+        lora_used = gr.Dropdown(
+            choices=["<base>"] + lora_choices,
+            multiselect=True,
+            label="LoRA(s)",
+            **info_kwargs("Select trained models"),
+        )
         with gr.Accordion("Advanced Settings", open=False):
             profile_sel = gr.Radio(
                 ["Short Audio", "Long Audio"],
@@ -1029,7 +1123,9 @@ with gr.Blocks() as demo:
                 seg_gap,
             )
 
-        infer_btn.click(
+        infer_event = infer_btn.click(
+            lambda: gr.update(visible=True), None, spinner, queue=False
+        ).then(
             run_infer,
             [
                 mode,
@@ -1049,22 +1145,45 @@ with gr.Blocks() as demo:
                 seg_gap,
             ],
             [gallery, last_audio],
-        )
+        ).then(lambda: gr.update(visible=False), None, spinner, queue=False)
 
         clear_btn.click(lambda: ("", None), None, [gallery, last_audio], queue=False)
 
     with gr.Tab("Auto Pipeline"):
-        auto_dataset = gr.Dropdown(choices=list_source_audio(), label="Dataset")
+        gr.Markdown("Run dataset preparation, training and inference in one go.")
+        auto_dataset = gr.Dropdown(
+            choices=list_source_audio(),
+            label="Dataset",
+            **info_kwargs("Source audio for pipeline"),
+        )
         auto_status = gr.Markdown()
-        auto_prompt = gr.Textbox(label="Prompt")
+        auto_prompt = gr.Textbox(
+            label="Prompt",
+            **info_kwargs("Text to generate"),
+        )
         auto_btn = gr.Button("Run Pipeline")
         auto_log = gr.Textbox()
         auto_audio = gr.Audio(label="Output")
 
         auto_dataset.change(dataset_status, auto_dataset, auto_status)
-        auto_btn.click(run_full_pipeline, [auto_dataset, auto_prompt], [auto_log, auto_audio])
+        auto_event = auto_btn.click(
+            lambda: gr.update(visible=True), None, spinner, queue=False
+        ).then(
+            run_full_pipeline,
+            [auto_dataset, auto_prompt],
+            [auto_log, auto_audio],
+        ).then(lambda: gr.update(visible=False), None, spinner, queue=False)
 
-    refresh_btn.click(refresh_lists, None, [local_ds, lora_used, prompt_list_dd, local_audio, auto_dataset])
+    with gr.Row():
+        system_info = gr.Markdown(get_system_info())
+        log_panel = gr.Textbox(value=read_logs(), label="Recent Logs", lines=10, interactive=False)
+
+    prepare_event.then(update_logs, None, log_panel)
+    train_event.then(update_logs, None, log_panel)
+    infer_event.then(update_logs, None, log_panel)
+    auto_event.then(update_logs, None, log_panel)
+
+    refresh_btn.click(refresh_lists, None, [local_ds, lora_used, prompt_list_dd, local_audio, auto_dataset]).then(update_logs, None, log_panel)
 
 
 if __name__ == "__main__":
