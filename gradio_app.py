@@ -453,29 +453,18 @@ def print_segment_log(prompt: str, segments: list[str]) -> None:
 def split_prompt_full(
     text: str,
     tokenizer,
-    chunk_size: int = 50,
     return_text: bool = False,
 ) -> list[torch.Tensor] | tuple[list[str], list[torch.Tensor]]:
-    """Split text at every punctuation mark and group into chunks."""
+    """Split ``text`` at every comma, period, question mark or exclamation point."""
     parts = [
         p.strip()
         for p in re.findall(r"[^,.!?]+(?:[,.!?]+|$)", text.strip())
         if p.strip()
     ]
-    segments: list[str] = []
-    current: list[str] = []
-    for part in parts:
-        candidate = " ".join(current + [part])
-        token_len = len(tokenizer(candidate, add_special_tokens=False).input_ids)
-        if token_len > chunk_size and current:
-            segments.append(" ".join(current))
-            current = [part]
-        else:
-            current.append(part)
-    if current:
-        segments.append(" ".join(current))
-    token_segments = [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
-    return (segments, token_segments) if return_text else token_segments
+    token_segments = [
+        tokenizer(p, return_tensors="pt").input_ids.squeeze(0) for p in parts
+    ]
+    return (parts, token_segments) if return_text else token_segments
 
 
 def split_prompt_by_sentences(
