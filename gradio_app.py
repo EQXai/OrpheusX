@@ -14,6 +14,7 @@ import re
 import unsloth  # must be imported before transformers
 from transformers import AutoTokenizer
 import gradio as gr
+import inspect
 import gc
 import time
 from tools.logger_utils import get_logger, LOG_FILE
@@ -35,6 +36,37 @@ SOURCE_AUDIO_DIR = REPO_ROOT / "source_audio"
 MAX_PROMPTS = 5
 
 logger = get_logger("gradio_app")
+
+# Certain versions of gradio support an "info" parameter for components.
+# Check once so we can gracefully degrade if unavailable.
+INFO_SUPPORTED = "info" in inspect.signature(gr.Textbox.__init__).parameters
+
+
+def info_kwargs(text: str) -> dict:
+    """Return a dictionary with "info" if supported."""
+    return {"info": text} if INFO_SUPPORTED else {}
+
+
+def get_system_info() -> str:
+    """Return formatted device and model info."""
+    if torch.cuda.is_available():
+        device = torch.cuda.get_device_name(0)
+    else:
+        device = platform.processor() or "CPU"
+    return f"**Device:** {device}  \n**Model:** {MODEL_NAME}"
+
+
+def read_logs(lines: int = 15) -> str:
+    """Return the last few lines from the log file."""
+    if LOG_FILE.is_file():
+        data = LOG_FILE.read_text(encoding="utf-8").splitlines()[-lines:]
+        return "\n".join(data)
+    return ""
+
+
+def update_logs() -> str:
+    """Helper for gradio to refresh log panel."""
+    return read_logs()
 
 
 def get_system_info() -> str:
@@ -888,10 +920,19 @@ with gr.Blocks(css=GLOBAL_CSS) as demo:
 
     with gr.Tab("Prepare Dataset"):
         gr.Markdown("Upload or select audio files to build a training dataset.")
-        audio_input = gr.Audio(type="filepath", label="Upload audio", info="WAV or MP3 file")
-        local_audio = gr.Dropdown(choices=list_source_audio(), multiselect=True, label="Existing audio file(s)", info="Select from source_audio")
+        audio_input = gr.Audio(type="filepath", label="Upload audio", **info_kwargs("WAV or MP3 file"))
+        local_audio = gr.Dropdown(
+            choices=list_source_audio(),
+            multiselect=True,
+            label="Existing audio file(s)",
+            **info_kwargs("Select from source_audio"),
+        )
         local_preview = gr.Audio(label="Preview", interactive=False, visible=False)
-        dataset_name = gr.Textbox(label="Dataset Name (for upload)", info="Name for new dataset")
+        dataset_name = gr.Textbox(
+            label="Dataset Name (for upload)",
+            **info_kwargs("Name for new dataset"),
+        )
+
         segment_tokens = gr.Number(value=50, precision=0, label="Max tokens per segment", visible=False)
         segment_duration = gr.Number(value=0, precision=1, label="Min seconds per segment", visible=False)
         model_max_len = gr.Number(value=2048, precision=0, label="Model max length", visible=False)
@@ -915,8 +956,17 @@ with gr.Blocks(css=GLOBAL_CSS) as demo:
 
     with gr.Tab("Train LoRA"):
         gr.Markdown("Train a LoRA model using prepared datasets.")
-        hf_input = gr.Textbox(label="HF dataset link (one per line)", info="Hugging Face dataset URLs")
-        local_ds = gr.Dropdown(choices=dataset_choices, multiselect=True, label="Local dataset(s)", info="Datasets prepared locally")
+        hf_input = gr.Textbox(
+            label="HF dataset link (one per line)",
+            **info_kwargs("Hugging Face dataset URLs"),
+        )
+        local_ds = gr.Dropdown(
+            choices=dataset_choices,
+            multiselect=True,
+            label="Local dataset(s)",
+            **info_kwargs("Datasets prepared locally"),
+        )
+
         model_max_len_train = gr.Number(value=2048, precision=0, label="Model max length", visible=False)
         with gr.Accordion("Ajustes avanzados", open=False):
             batch_size = gr.Number(value=1, precision=0, label="Batch size")
@@ -957,11 +1007,25 @@ with gr.Blocks(css=GLOBAL_CSS) as demo:
         mode = gr.Radio(["Manual", "Prompt List"], value="Manual", label="Prompt source")
         num_prompts = gr.Number(value=1, precision=0, label="Number of prompts")
         prompt_boxes = [
-            gr.Textbox(label=f"Prompt {i+1}", visible=(i == 0), info="Text description")
+            gr.Textbox(
+                label=f"Prompt {i+1}",
+                visible=(i == 0),
+                **info_kwargs("Text description"),
+            )
             for i in range(MAX_PROMPTS)
         ]
-        prompt_list_dd = gr.Dropdown(choices=prompt_files, label="Prompt list", visible=False, info="JSON list of prompts")
-        lora_used = gr.Dropdown(choices=["<base>"] + lora_choices, multiselect=True, label="LoRA(s)", info="Select trained models")
+        prompt_list_dd = gr.Dropdown(
+            choices=prompt_files,
+            label="Prompt list",
+            visible=False,
+            **info_kwargs("JSON list of prompts"),
+        )
+        lora_used = gr.Dropdown(
+            choices=["<base>"] + lora_choices,
+            multiselect=True,
+            label="LoRA(s)",
+            **info_kwargs("Select trained models"),
+        )
         with gr.Accordion("Advanced Settings", open=False):
             profile_sel = gr.Radio(
                 ["Short Audio", "Long Audio"],
@@ -1111,9 +1175,16 @@ with gr.Blocks(css=GLOBAL_CSS) as demo:
 
     with gr.Tab("Auto Pipeline"):
         gr.Markdown("Run dataset preparation, training and inference in one go.")
-        auto_dataset = gr.Dropdown(choices=list_source_audio(), label="Dataset", info="Source audio for pipeline")
+        auto_dataset = gr.Dropdown(
+            choices=list_source_audio(),
+            label="Dataset",
+            **info_kwargs("Source audio for pipeline"),
+        )
         auto_status = gr.Markdown()
-        auto_prompt = gr.Textbox(label="Prompt", info="Text to generate")
+        auto_prompt = gr.Textbox(
+            label="Prompt",
+            **info_kwargs("Text to generate"),
+        )
         auto_btn = gr.Button("Run Pipeline")
         auto_log = gr.Textbox()
         auto_audio = gr.Audio(label="Output")
