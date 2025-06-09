@@ -623,6 +623,7 @@ def generate_audio(
     seg_chars: list[str] | None = None,
     seg_min_tokens: int = 0,
     seg_max_tokens: int = 50,
+    seg_gap: float = 0.0,
 ) -> str:
     model_name = MODEL_NAME
     lora_path = None
@@ -677,7 +678,9 @@ def generate_audio(
         if final_audio is None:
             final_audio = part
         else:
-            final_audio = concat_with_fade([final_audio, part])
+            final_audio = concat_with_fade(
+                [final_audio, part], gap_ms=int(seg_gap * 1000)
+            )
         torch.cuda.empty_cache()
         gc.collect()
     if final_audio is None:
@@ -708,6 +711,7 @@ def generate_batch(
     seg_chars: list[str] | None,
     seg_min_tokens: int,
     seg_max_tokens: int,
+    seg_gap: float = 0.0,
 ) -> tuple[str, str]:
     """Generate audio for multiple prompts/LORAs."""
     if not prompts:
@@ -734,6 +738,7 @@ def generate_batch(
                 seg_chars,
                 seg_min_tokens,
                 seg_max_tokens,
+                seg_gap,
             )
             torch.cuda.empty_cache()
             gc.collect()
@@ -862,6 +867,9 @@ with gr.Blocks() as demo:
             seg_max_tokens = gr.Number(
                 value=50, precision=0, label="Max tokens per segment"
             )
+            seg_gap = gr.Number(
+                value=0.0, precision=1, label="Gap between segments (s)"
+            )
 
             def apply_profile(preset):
                 if preset == "Long Audio":
@@ -872,6 +880,7 @@ with gr.Blocks() as demo:
                         gr.update(value=[",", ".", "?", "!"]),
                         gr.update(value=0),
                         gr.update(value=50),
+                        gr.update(value=0.0),
                     )
                 return (
                     gr.update(value=1200),
@@ -880,6 +889,7 @@ with gr.Blocks() as demo:
                     gr.update(value=[",", ".", "?", "!"]),
                     gr.update(value=0),
                     gr.update(value=50),
+                    gr.update(value=0.0),
                 )
 
             profile_sel.change(
@@ -892,6 +902,7 @@ with gr.Blocks() as demo:
                     segment_chars,
                     seg_min_tokens,
                     seg_max_tokens,
+                    seg_gap,
                 ],
             )
         infer_btn = gr.Button("Generate")
@@ -934,6 +945,7 @@ with gr.Blocks() as demo:
             seg_chars = args[MAX_PROMPTS + 8] or []
             seg_min = int(args[MAX_PROMPTS + 9] or 0)
             seg_max = int(args[MAX_PROMPTS + 10] or 50)
+            seg_gap = float(args[MAX_PROMPTS + 11] or 0)
             return generate_batch(
                 prompts,
                 loras,
@@ -946,6 +958,7 @@ with gr.Blocks() as demo:
                 seg_chars,
                 seg_min,
                 seg_max,
+                seg_gap,
             )
 
         infer_btn.click(
@@ -965,6 +978,7 @@ with gr.Blocks() as demo:
                 segment_chars,
                 seg_min_tokens,
                 seg_max_tokens,
+                seg_gap,
             ],
             [gallery, last_audio],
         )
