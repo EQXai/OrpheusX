@@ -111,6 +111,10 @@ algorithm ignores consecutive commas and merges pieces shorter than three words
 with their neighbors so lists or short phrases aren't broken awkwardly. Enable
 sentence segmentation for long prompts with natural pause points.
 
+The Gradio interface lets you choose which punctuation characters trigger
+segmentation (comma, period, question mark and exclamation point) and specify a
+minimum and maximum token count for each segment.
+
 While generating audio, the CLI prints a segmentation log showing where each
 chunk starts and ends. After all segments are generated they are automatically
 crossfaded to hide the cuts.
