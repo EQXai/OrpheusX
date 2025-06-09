@@ -353,7 +353,12 @@ def get_snac_model():
     return _SNAC_MODEL
 
 
-def split_prompt_by_tokens(text: str, tokenizer, chunk_size: int = 50) -> list[torch.Tensor]:
+def split_prompt_by_tokens(
+    text: str,
+    tokenizer,
+    chunk_size: int = 50,
+    return_text: bool = False,
+) -> list[torch.Tensor] | tuple[list[str], list[torch.Tensor]]:
     """Split text into token chunks without cutting words."""
     words = text.split()
     segments: list[str] = []
@@ -370,12 +375,27 @@ def split_prompt_by_tokens(text: str, tokenizer, chunk_size: int = 50) -> list[t
             token_len += n_tokens
     if current:
         segments.append(" ".join(current))
-    return [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
+    token_segments = [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
+    return (segments, token_segments) if return_text else token_segments
+
+
+def print_segment_log(prompt: str, segments: list[str]) -> None:
+    """Print segment boundaries for a prompt."""
+    print("Segmentation log:")
+    offset = 0
+    for idx, seg in enumerate(segments, 1):
+        start = prompt.find(seg, offset)
+        end = start + len(seg)
+        print(f"{idx}: chars {start}-{end}: {seg}")
+        offset = end
 
 
 def split_prompt_by_sentences(
-    text: str, tokenizer, chunk_size: int = 50
-) -> list[torch.Tensor]:
+    text: str,
+    tokenizer,
+    chunk_size: int = 50,
+    return_text: bool = False,
+) -> list[torch.Tensor] | tuple[list[str], list[torch.Tensor]]:
     """Split text into sentence groups not exceeding ``chunk_size`` tokens."""
     raw_parts = [s.strip() for s in re.split(r"(?<=[.!?,])\s+", text.strip()) if s.strip()]
     sentences: list[str] = []
@@ -398,7 +418,8 @@ def split_prompt_by_sentences(
             current.append(sent)
     if current:
         segments.append(" ".join(current))
-    return [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
+    token_segments = [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
+    return (segments, token_segments) if return_text else token_segments
 
 
 def generate_audio_segment(
@@ -487,9 +508,10 @@ def generate_audio(
 
     if segment:
         if segment_by == "sentence":
-            segments = split_prompt_by_sentences(text, tokenizer)
+            seg_text, segments = split_prompt_by_sentences(text, tokenizer, return_text=True)
         else:
-            segments = split_prompt_by_tokens(text, tokenizer)
+            seg_text, segments = split_prompt_by_tokens(text, tokenizer, return_text=True)
+        print_segment_log(text, seg_text)
     else:
         segments = [tokenizer(text, return_tensors='pt').input_ids.squeeze(0)]
     audio_parts = [
