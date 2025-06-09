@@ -45,6 +45,7 @@ def info_kwargs(comp_cls: type, text: str) -> dict:
     return {"info": text} if "info" in inspect.signature(comp_cls.__init__).parameters else {}
 
 
+
 def get_system_info() -> str:
     """Return formatted device and model info."""
     if torch.cuda.is_available():
@@ -901,17 +902,20 @@ with gr.Blocks(css=GLOBAL_CSS) as demo:
             label="Upload audio",
             **info_kwargs(gr.Audio, "WAV or MP3 file"),
         )
+
         local_audio = gr.Dropdown(
             choices=list_source_audio(),
             multiselect=True,
             label="Existing audio file(s)",
             **info_kwargs(gr.Dropdown, "Select from source_audio"),
+
         )
         local_preview = gr.Audio(label="Preview", interactive=False, visible=False)
         dataset_name = gr.Textbox(
             label="Dataset Name (for upload)",
             **info_kwargs(gr.Textbox, "Name for new dataset"),
         )
+
         segment_tokens = gr.Number(value=50, precision=0, label="Max tokens per segment", visible=False)
         segment_duration = gr.Number(value=0, precision=1, label="Min seconds per segment", visible=False)
         model_max_len = gr.Number(value=2048, precision=0, label="Model max length", visible=False)
@@ -989,6 +993,7 @@ with gr.Blocks(css=GLOBAL_CSS) as demo:
                 label=f"Prompt {i+1}",
                 visible=(i == 0),
                 **info_kwargs(gr.Textbox, "Text description"),
+
             )
             for i in range(MAX_PROMPTS)
         ]
@@ -997,12 +1002,14 @@ with gr.Blocks(css=GLOBAL_CSS) as demo:
             label="Prompt list",
             visible=False,
             **info_kwargs(gr.Dropdown, "JSON list of prompts"),
+
         )
         lora_used = gr.Dropdown(
             choices=["<base>"] + lora_choices,
             multiselect=True,
             label="LoRA(s)",
             **info_kwargs(gr.Dropdown, "Select trained models"),
+
         )
         with gr.Accordion("Advanced Settings", open=False):
             profile_sel = gr.Radio(
@@ -1157,11 +1164,14 @@ with gr.Blocks(css=GLOBAL_CSS) as demo:
             choices=list_source_audio(),
             label="Dataset",
             **info_kwargs(gr.Dropdown, "Source audio for pipeline"),
+
+
         )
         auto_status = gr.Markdown()
         auto_prompt = gr.Textbox(
             label="Prompt",
             **info_kwargs(gr.Textbox, "Text to generate"),
+
         )
         auto_btn = gr.Button("Run Pipeline")
         auto_log = gr.Textbox()
