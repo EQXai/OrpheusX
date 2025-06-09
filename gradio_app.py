@@ -758,6 +758,44 @@ def generate_batch(
     return "\n".join(html_items), last_path
 
 
+def dataset_status(name: str) -> str:
+    """Return model status message for a dataset."""
+    ds_name = Path(name).stem
+    lora_path = LORA_DIR / ds_name / "lora_model"
+    return "Model already created" if lora_path.is_dir() else ""
+
+
+def run_full_pipeline(dataset_file: str, prompt: str) -> tuple[str, str]:
+    """Prepare dataset, train LoRA and run inference."""
+    if not dataset_file:
+        return "No dataset selected", ""
+    if not prompt:
+        return "Prompt is empty", ""
+    ds_name = Path(dataset_file).stem
+    audio_path = SOURCE_AUDIO_DIR / dataset_file
+    dataset_dir = DATASETS_DIR / ds_name
+    lora_dir = LORA_DIR / ds_name / "lora_model"
+    progress = gr.Progress()
+    msgs = []
+    if not dataset_dir.is_dir():
+        progress(0.0, desc="Preparing dataset")
+        prepare_dataset(str(audio_path), str(dataset_dir))
+        msgs.append("Dataset prepared")
+    else:
+        msgs.append("Dataset already prepared")
+    if not lora_dir.is_dir():
+        progress(0.33, desc="Training LoRA")
+        train_lora_single(str(dataset_dir), ds_name, True)
+        msgs.append("LoRA trained")
+    else:
+        msgs.append("LoRA already trained")
+    progress(0.66, desc="Generating audio")
+    out_path = generate_audio(prompt, ds_name)
+    progress(1, desc="Done")
+    msgs.append(f"Audio saved to {out_path}")
+    return "\n".join(msgs), out_path
+
+
 # ---- Gradio Interface ----
 dataset_choices = list_datasets()
 lora_choices = list_loras()
@@ -771,6 +809,7 @@ def refresh_lists() -> tuple:
         gr.update(choices=list_datasets()),
         gr.update(choices=["<base>"] + list_loras()),
         gr.update(choices=list_prompt_files()),
+        gr.update(choices=list_source_audio()),
         gr.update(choices=list_source_audio()),
     )
 
@@ -985,7 +1024,18 @@ with gr.Blocks() as demo:
 
         clear_btn.click(lambda: ("", None), None, [gallery, last_audio], queue=False)
 
-    refresh_btn.click(refresh_lists, None, [local_ds, lora_used, prompt_list_dd, local_audio])
+    with gr.Tab("Auto Pipeline"):
+        auto_dataset = gr.Dropdown(choices=list_source_audio(), label="Dataset")
+        auto_status = gr.Markdown()
+        auto_prompt = gr.Textbox(label="Prompt")
+        auto_btn = gr.Button("Run Pipeline")
+        auto_log = gr.Textbox()
+        auto_audio = gr.Audio(label="Output")
+
+        auto_dataset.change(dataset_status, auto_dataset, auto_status)
+        auto_btn.click(run_full_pipeline, [auto_dataset, auto_prompt], [auto_log, auto_audio])
+
+    refresh_btn.click(refresh_lists, None, [local_ds, lora_used, prompt_list_dd, local_audio, auto_dataset])
 
 
 if __name__ == "__main__":
