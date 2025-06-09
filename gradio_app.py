@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import json
 import re
+import unsloth  # must be imported before transformers
 import gradio as gr
 import gc
 import time
@@ -449,6 +450,30 @@ def print_segment_log(prompt: str, segments: list[str]) -> None:
         offset = end
 
 
+def split_prompt_full(
+    text: str,
+    tokenizer,
+    chunk_size: int = 50,
+    return_text: bool = False,
+) -> list[torch.Tensor] | tuple[list[str], list[torch.Tensor]]:
+    """Split text at every punctuation mark and group into chunks."""
+    parts = [p.strip() for p in re.findall(r"[^,.!?]+[,.!?]?", text.strip()) if p.strip()]
+    segments: list[str] = []
+    current: list[str] = []
+    for part in parts:
+        candidate = " ".join(current + [part])
+        token_len = len(tokenizer(candidate, add_special_tokens=False).input_ids)
+        if token_len > chunk_size and current:
+            segments.append(" ".join(current))
+            current = [part]
+        else:
+            current.append(part)
+    if current:
+        segments.append(" ".join(current))
+    token_segments = [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
+    return (segments, token_segments) if return_text else token_segments
+
+
 def split_prompt_by_sentences(
     text: str,
     tokenizer,
@@ -574,6 +599,8 @@ def generate_audio(
     if segment:
         if segment_by == "sentence":
             seg_text, segments = split_prompt_by_sentences(text, tokenizer, return_text=True)
+        elif segment_by == "full_segment":
+            seg_text, segments = split_prompt_full(text, tokenizer, return_text=True)
         else:
             seg_text, segments = split_prompt_by_tokens(text, tokenizer, return_text=True)
         print_segment_log(text, seg_text)
@@ -754,7 +781,11 @@ with gr.Blocks() as demo:
             rep_penalty = gr.Slider(1.0, 2.0, value=1.1, label="Repetition Penalty")
             max_tokens = gr.Number(value=1200, precision=0, label="Max New Tokens")
             segment_chk = gr.Checkbox(label="Segment text")
-            segment_method = gr.Radio(["tokens", "sentence"], value="tokens", label="Segment by")
+            segment_method = gr.Radio([
+                "tokens",
+                "sentence",
+                "full_segment",
+            ], value="tokens", label="Segment by")
 
             def apply_profile(preset):
                 if preset == "Long Audio":
