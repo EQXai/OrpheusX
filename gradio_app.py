@@ -457,7 +457,11 @@ def split_prompt_full(
     return_text: bool = False,
 ) -> list[torch.Tensor] | tuple[list[str], list[torch.Tensor]]:
     """Split text at every punctuation mark and group into chunks."""
-    parts = [p.strip() for p in re.findall(r"[^,.!?]+[,.!?]?", text.strip()) if p.strip()]
+    parts = [
+        p.strip()
+        for p in re.findall(r"[^,.!?]+(?:[,.!?]+|$)", text.strip())
+        if p.strip()
+    ]
     segments: list[str] = []
     current: list[str] = []
     for part in parts:
