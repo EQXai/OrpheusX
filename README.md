@@ -71,6 +71,7 @@ python scripts/orpheus_cli.py
 - The dataset helper lists audio files from `source_audio/` so you can pick them interactively
 - Segmentation mode prints the start and end index of each chunk so you know where text was split
 - Trained LoRA adapters are stored under `scripts/lora_models/<dataset>/lora_model`
+- Detailed logs for the CLI and Gradio interface are saved under `logs/orpheus.log`
 
 All features are available via an interactive command-line menu.
 
@@ -91,6 +92,11 @@ available LoRA models and can also load prompt lists from `prompt_list/`.
 The "Max New Tokens" setting defaults to 1200. The model has a 2048 token
 context limit, so the sum of prompt tokens and new tokens should not exceed
 this value.
+
+The interface offers two presets under "Advanced Settings": **Short Audio**
+and **Long Audio**. The short preset keeps segmentation disabled and limits
+new tokens to 1200, while the long preset enables sentence segmentation and
+allows up to 2400 new tokens.
 
 ### Prompt Segmentation
 

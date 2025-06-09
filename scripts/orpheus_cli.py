@@ -2,19 +2,29 @@
 """Simple interactive CLI to manage OrpheusX workflows."""
 import os
 import subprocess
+import time
 from pathlib import Path
+from tools.logger_utils import get_logger
 
 # Resolve repository root based on script location
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 
+logger = get_logger("orpheus_cli")
+
 
 def run_script(command, shell=False):
-    """Run a command as subprocess and stream its output."""
+    """Run a command as subprocess and stream its output with logging."""
+    cmd_str = command if isinstance(command, str) else " ".join(command)
+    logger.info("Running: %s", cmd_str)
+    start = time.perf_counter()
     try:
         subprocess.run(command, check=True, cwd=str(SCRIPTS_DIR), shell=shell)
+        elapsed = time.perf_counter() - start
+        logger.info("Finished in %.2fs", elapsed)
     except subprocess.CalledProcessError as exc:
-        print(f"Command failed: {exc}")
+        elapsed = time.perf_counter() - start
+        logger.error("Command failed after %.2fs: %s", elapsed, exc)
 
 
 def install():
@@ -81,7 +91,8 @@ def main() -> None:
         if not action:
             print("Invalid option")
             continue
-        _, func = action
+        label, func = action
+        logger.info("Selected option: %s", label)
         func()
 
 
