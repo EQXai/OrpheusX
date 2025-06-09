@@ -310,16 +310,19 @@ def main():
                 print_segment_log(text, seg_text)
             else:
                 segments = [tokenizer(text, return_tensors="pt").input_ids.squeeze(0)]
-            audio_parts = []
+            final_audio = None
             for ids in segments:
-                audio_parts.append(
-                    generate_audio_segment(
-                        ids, model, snac_model, max_new_tokens=args.max_tokens
-                    )
+                part = generate_audio_segment(
+                    ids, model, snac_model, max_new_tokens=args.max_tokens
                 )
+                if final_audio is None:
+                    final_audio = part
+                else:
+                    final_audio = concat_with_fade([final_audio, part])
                 torch.cuda.empty_cache()
                 gc.collect()
-            final_audio = concat_with_fade(audio_parts)
+            if final_audio is None:
+                continue
             path = get_output_path(lora_choice or "base_model")
             torchaudio.save(path, final_audio.detach().cpu(), 24000)
             print(f"Audio written to {path}")
