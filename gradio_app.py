@@ -12,6 +12,7 @@ from pathlib import Path
 import json
 import re
 import unsloth  # must be imported before transformers
+from transformers import AutoTokenizer
 import gradio as gr
 import gc
 import time
@@ -359,6 +360,7 @@ _LOADED_LORA_PATH: str | None = None
 _LOADED_MODEL = None
 _LOADED_TOKENIZER = None
 _SNAC_MODEL = None
+_PIPELINE_TOKENIZER = None
 
 
 def load_model(base_model: str, lora_path: str | None):
@@ -411,6 +413,17 @@ def get_snac_model():
         _SNAC_MODEL = SNAC.from_pretrained("hubertsiuzdak/snac_24khz", cache_dir=str(CACHE_DIR))
         _SNAC_MODEL = _SNAC_MODEL.to("cpu")
     return _SNAC_MODEL
+
+
+def get_pipeline_tokenizer():
+    """Return a cached tokenizer for length checks."""
+    global _PIPELINE_TOKENIZER
+    if _PIPELINE_TOKENIZER is None:
+        _PIPELINE_TOKENIZER = AutoTokenizer.from_pretrained(
+            MODEL_NAME,
+            cache_dir=str(CACHE_DIR),
+        )
+    return _PIPELINE_TOKENIZER
 
 
 def _merge_short_segments(
@@ -789,8 +802,24 @@ def run_full_pipeline(dataset_file: str, prompt: str) -> tuple[str, str]:
         msgs.append("LoRA trained")
     else:
         msgs.append("LoRA already trained")
+    tokenizer = get_pipeline_tokenizer()
+    token_len = len(tokenizer(prompt, add_special_tokens=False).input_ids)
+    use_segmentation = token_len > 50
     progress(0.66, desc="Generating audio")
-    out_path = generate_audio(prompt, ds_name)
+    if use_segmentation:
+        out_path = generate_audio(
+            prompt,
+            ds_name,
+            max_new_tokens=2400,
+            segment=True,
+            segment_by="sentence",
+            seg_chars=[",", ".", "?", "!"],
+            seg_min_tokens=0,
+            seg_max_tokens=50,
+            seg_gap=0.5,
+        )
+    else:
+        out_path = generate_audio(prompt, ds_name)
     progress(1, desc="Done")
     msgs.append(f"Audio saved to {out_path}")
     return "\n".join(msgs), out_path
