@@ -118,6 +118,16 @@ def train_lora_single(
     dataset_source: str,
     lora_name: str,
     is_local: bool,
+    batch_size: int = 1,
+    grad_steps: int = 4,
+    warm_steps: int = 5,
+    max_steps: int = 60,
+    epochs: int = 1,
+    lr: float = 2e-4,
+    log_steps: int = 1,
+    weight_decay: float = 0.01,
+    optim: str = "adamw_8bit",
+    scheduler: str = "linear",
 ) -> str:
     """Train a single LoRA on a dataset."""
     logger.info("Training LoRA %s from %s", lora_name, dataset_source)
@@ -255,17 +265,18 @@ def train_lora_single(
         model=model,
         train_dataset=dataset,
         args=TrainingArguments(
-            per_device_train_batch_size=1,
-            gradient_accumulation_steps=4,
-            warmup_steps=5,
-            max_steps=60,
-            learning_rate=2e-4,
+            per_device_train_batch_size=batch_size,
+            gradient_accumulation_steps=grad_steps,
+            warmup_steps=warm_steps,
+            max_steps=max_steps,
+            num_train_epochs=epochs,
+            learning_rate=lr,
             fp16=not is_bfloat16_supported(),
             bf16=is_bfloat16_supported(),
-            logging_steps=1,
-            optim="adamw_8bit",
-            weight_decay=0.01,
-            lr_scheduler_type="linear",
+            logging_steps=log_steps,
+            optim=optim,
+            weight_decay=weight_decay,
+            lr_scheduler_type=scheduler,
             seed=3407,
             output_dir="outputs",
             report_to="none",
@@ -281,7 +292,20 @@ def train_lora_single(
     return f"LoRA saved under {save_dir.resolve()}"
 
 
-def train_loras(hf_links: str, local_datasets: list[str]) -> str:
+def train_loras(
+    hf_links: str,
+    local_datasets: list[str],
+    batch_size: int,
+    grad_steps: int,
+    warm_steps: int,
+    max_steps: int,
+    epochs: int,
+    lr: float,
+    log_steps: int,
+    weight_decay: float,
+    optim: str,
+    scheduler: str,
+) -> str:
     """Train one or more LoRAs based on the provided sources."""
     dataset_info: list[tuple[str, str, bool]] = []
     links = [l.strip() for l in hf_links.splitlines() if l.strip()]
@@ -300,7 +324,21 @@ def train_loras(hf_links: str, local_datasets: list[str]) -> str:
         progress((idx - 1) / total, desc=f"Training {name}...")
         start = time.perf_counter()
         try:
-            msg = train_lora_single(src, name, is_local)
+            msg = train_lora_single(
+                src,
+                name,
+                is_local,
+                batch_size,
+                grad_steps,
+                warm_steps,
+                max_steps,
+                epochs,
+                lr,
+                log_steps,
+                weight_decay,
+                optim,
+                scheduler,
+            )
             msgs.append(f"{name}: success")
             elapsed = time.perf_counter() - start
             logger.info("%s trained in %.2fs", name, elapsed)
@@ -667,9 +705,37 @@ with gr.Blocks() as demo:
         hf_input = gr.Textbox(label="HF dataset link (one per line)")
         local_ds = gr.Dropdown(choices=dataset_choices, multiselect=True, label="Local dataset(s)")
         model_max_len_train = gr.Number(value=2048, precision=0, label="Model max length", visible=False)
+        with gr.Accordion("Ajustes avanzados", open=False):
+            batch_size = gr.Number(value=1, precision=0, label="Batch size")
+            grad_steps = gr.Number(value=4, precision=0, label="Gradient accumulation")
+            warmup_steps = gr.Number(value=5, precision=0, label="Warmup steps")
+            max_steps = gr.Number(value=60, precision=0, label="Max steps")
+            epochs = gr.Number(value=1, precision=0, label="Epochs")
+            lr = gr.Number(value=2e-4, label="Learning rate")
+            log_steps = gr.Number(value=1, precision=0, label="Logging steps")
+            weight_decay = gr.Number(value=0.01, label="Weight decay")
+            optim = gr.Textbox(value="adamw_8bit", label="Optimizer")
+            scheduler = gr.Textbox(value="linear", label="LR scheduler type")
         train_btn = gr.Button("Train")
         train_output = gr.Textbox()
-        train_btn.click(train_loras, [hf_input, local_ds], train_output)
+        train_btn.click(
+            train_loras,
+            [
+                hf_input,
+                local_ds,
+                batch_size,
+                grad_steps,
+                warmup_steps,
+                max_steps,
+                epochs,
+                lr,
+                log_steps,
+                weight_decay,
+                optim,
+                scheduler,
+            ],
+            train_output,
+        )
 
     with gr.Tab("Inference"):
         mode = gr.Radio(["Manual", "Prompt List"], value="Manual", label="Prompt source")
