@@ -1,8 +1,10 @@
 import torch
 
-def concat_with_fade(chunks, sample_rate=24000, fade_ms=20, gap_ms=0):
-    """Concatenate audio tensors with a short crossfade.
+def concat_with_fade(chunks, sample_rate: int = 24000, fade_ms: int = 20, gap_ms: int = 0, dtype: torch.dtype | None = torch.float32):
+    """Concatenate audio tensors with optional cross-fade and silence gap.
 
+    The helper now validates the input list and, when *dtype* is provided,
+    casts every tensor to the requested dtype to avoid type mismatches.
 
     Parameters
     ----------
@@ -15,15 +17,29 @@ def concat_with_fade(chunks, sample_rate=24000, fade_ms=20, gap_ms=0):
         Duration of the crossfade in milliseconds, by default 20.
     gap_ms : int, optional
         Silence inserted between chunks in milliseconds, by default 0.
+    dtype : torch.dtype | None, optional
+        The desired data type of the output tensor. If None, the default dtype is used.
     Returns
     -------
     torch.Tensor
         The concatenated audio tensor.
     """
     if not chunks:
-        return torch.tensor([], dtype=torch.float32)
+        # Return an empty tensor in the requested precision.
+        return torch.tensor([], dtype=dtype or torch.float32)
     if len(chunks) == 1:
-        return chunks[0]
+        return chunks[0].to(dtype) if dtype is not None else chunks[0]
+
+    # Ensure all inputs are tensors of rank 1 or 2 and move to requested dtype.
+    cleaned: list[torch.Tensor] = []
+    for idx, ch in enumerate(chunks):
+        if not isinstance(ch, torch.Tensor):
+            raise TypeError(f"Chunk {idx} is not a torch.Tensor")
+        if ch.dim() not in (1, 2):
+            raise ValueError("Each chunk must be a 1D (mono) or 2D (channels, samples) tensor")
+        cleaned.append(ch.to(dtype) if dtype is not None else ch)
+
+    chunks = cleaned
 
     fade_samples = int(sample_rate * fade_ms / 1000)
     gap_samples = int(sample_rate * gap_ms / 1000)
