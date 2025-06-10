@@ -67,6 +67,7 @@ python scripts/orpheus_cli.py
 - Prompt lists in `prompt_list/` can be loaded for batch generation
 - Use `<laugh>`, `<chuckle>`, `<sigh>`, `<cough>`, `<sniffle>`, `<groan>`, `<yawn>`, `<gasp>` for preset expressions
 - When prompts are segmented, pieces are joined with a short crossfade for smooth audio
+- The crossfade defaults to **60 ms** and can be adjusted via the `--fade_ms` argument or the UI slider
 - Verify your environment with `python scripts/check_env.py` (checks packages, CUDA and ffmpeg)
 - The dataset helper lists audio files from `source_audio/` so you can pick them interactively
 - Segmentation mode prints the start and end index of each chunk so you know where text was split
@@ -123,5 +124,5 @@ interface exposes only character-based segmentation so you can verify how the
 
 While generating audio, the CLI prints a segmentation log showing where each
 chunk starts and ends. After all segments are generated they are automatically
-crossfaded to hide the cuts.
+crossfaded to hide the cuts. The default fade length is 60 ms.
 

@@ -148,6 +148,12 @@ def main():
         default=1200,
         help='Maximum number of tokens to generate',
     )
+    parser.add_argument(
+        '--fade_ms',
+        type=int,
+        default=60,
+        help='Crossfade duration in milliseconds',
+    )
     args = parser.parse_args()
     model, tokenizer = load_model(args.model, args.lora)
 
@@ -225,7 +231,7 @@ def main():
             if final_audio is None:
                 final_audio = part
             else:
-                final_audio = concat_with_fade([final_audio, part])
+                final_audio = concat_with_fade([final_audio, part], fade_ms=args.fade_ms)
             torch.cuda.empty_cache()
             gc.collect()
         if final_audio is None:
