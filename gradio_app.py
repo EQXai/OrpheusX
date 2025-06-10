@@ -816,7 +816,7 @@ def run_full_pipeline(dataset_file: str, prompt: str) -> tuple[str, str]:
             seg_chars=[",", ".", "?", "!"],
             seg_min_tokens=0,
             seg_max_tokens=50,
-            seg_gap=0.5,
+            seg_gap=0.0,
         )
     else:
         out_path = generate_audio(prompt, ds_name)
