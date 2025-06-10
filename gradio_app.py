@@ -640,6 +640,7 @@ def generate_audio(
     seg_min_tokens: int = 0,
     seg_max_tokens: int = 50,
     seg_gap: float = 0.0,
+    fade_ms: int = 60,
 ) -> str:
     model_name = MODEL_NAME
     lora_path = None
@@ -693,7 +694,7 @@ def generate_audio(
             final_audio = part
         else:
             final_audio = concat_with_fade(
-                [final_audio, part], gap_ms=int(seg_gap * 1000)
+                [final_audio, part], sample_rate=24000, fade_ms=fade_ms, gap_ms=int(seg_gap * 1000)
             )
         torch.cuda.empty_cache()
         gc.collect()
@@ -726,6 +727,7 @@ def generate_batch(
     seg_min_tokens: int,
     seg_max_tokens: int,
     seg_gap: float = 0.0,
+    fade_ms: int = 60,
 ) -> tuple[str, str]:
     """Generate audio for multiple prompts/LORAs."""
     if not prompts:
@@ -753,6 +755,7 @@ def generate_batch(
                 seg_min_tokens,
                 seg_max_tokens,
                 seg_gap,
+                fade_ms,
             )
             torch.cuda.empty_cache()
             gc.collect()
@@ -779,7 +782,7 @@ def dataset_status(name: str) -> str:
     return "Model already created" if lora_path.is_dir() else ""
 
 
-def run_full_pipeline(dataset_file: str, prompt: str) -> tuple[str, str]:
+def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tuple[str, str]:
     """Prepare dataset, train LoRA and run inference."""
     if not dataset_file:
         return "No dataset selected", ""
@@ -818,9 +821,10 @@ def run_full_pipeline(dataset_file: str, prompt: str) -> tuple[str, str]:
             seg_min_tokens=0,
             seg_max_tokens=50,
             seg_gap=0.0,
+            fade_ms=fade_ms,
         )
     else:
-        out_path = generate_audio(prompt, ds_name)
+        out_path = generate_audio(prompt, ds_name, fade_ms=fade_ms)
     progress(1, desc="Done")
     msgs.append(f"Audio saved to {out_path}")
     return "\n".join(msgs), out_path
@@ -950,6 +954,7 @@ with gr.Blocks() as demo:
                         seg_min_tokens = gr.Number(value=0, precision=0, label="Min tokens per segment")
                         seg_max_tokens = gr.Number(value=50, precision=0, label="Max tokens per segment")
                         seg_gap = gr.Number(value=0.0, precision=1, label="Gap between segments (s)")
+                        fade_ms_inp = gr.Number(value=60, precision=0, label="Crossfade (ms)")
                     infer_btn = gr.Button("Generate")
                     clear_btn = gr.Button("Clear Gallery")
                     gallery = gr.HTML(label="Outputs")
@@ -970,6 +975,7 @@ with gr.Blocks() as demo:
                         seg_min = int(args[base_idx + 9] or 0)
                         seg_max = int(args[base_idx + 10] or 50)
                         seg_gap = float(args[base_idx + 11] or 0)
+                        fade_ms = int(args[base_idx + 12] or 60)
                         if args[0] == "Manual":
                             num = int(args[1])
                             for box in args[2 : 2 + MAX_PROMPTS][:num]:
@@ -990,6 +996,7 @@ with gr.Blocks() as demo:
                             seg_min,
                             seg_max,
                             seg_gap,
+                            fade_ms,
                         )
 
                     infer_btn.click(
@@ -1010,6 +1017,7 @@ with gr.Blocks() as demo:
                             seg_min_tokens,
                             seg_max_tokens,
                             seg_gap,
+                            fade_ms_inp,
                         ],
                         [gallery, last_audio],
                     )
@@ -1050,12 +1058,13 @@ with gr.Blocks() as demo:
                         fs_rep_penalty = gr.Slider(1.0, 2.0, value=1.1, label="Repetition Penalty")
                         fs_max_tokens = gr.Number(value=1200, precision=0, label="Max New Tokens")
                         fs_gap = gr.Number(value=0.0, precision=1, label="Gap between segments (s)")
+                        fs_fade_ms = gr.Number(value=60, precision=0, label="Crossfade (ms)")
                     fs_btn = gr.Button("Generate")
                     fs_clear = gr.Button("Clear Gallery")
                     fs_gallery = gr.HTML(label="Outputs")
                     fs_last_audio = gr.Audio(label="Last Audio")
 
-                    def run_full_seg(prompt, loras, temp, top_p_val, rep, max_tok, seg_chars, gap):
+                    def run_full_seg(prompt, loras, temp, top_p_val, rep, max_tok, seg_chars, gap, fade):
                         return generate_batch(
                             [prompt] if prompt else [],
                             loras or [None],
@@ -1069,6 +1078,7 @@ with gr.Blocks() as demo:
                             0,
                             50,
                             gap,
+                            fade,
                         )
 
                     fs_btn.click(
@@ -1082,6 +1092,7 @@ with gr.Blocks() as demo:
                             fs_max_tokens,
                             fs_chars,
                             fs_gap,
+                            fs_fade_ms,
                         ],
                         [fs_gallery, fs_last_audio],
                     )

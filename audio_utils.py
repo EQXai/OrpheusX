@@ -1,6 +1,6 @@
 import torch
 
-def concat_with_fade(chunks, sample_rate: int = 24000, fade_ms: int = 20, gap_ms: int = 0, dtype: torch.dtype | None = torch.float32):
+def concat_with_fade(chunks, sample_rate: int = 24000, fade_ms: int = 60, gap_ms: int = 0, dtype: torch.dtype | None = torch.float32):
     """Concatenate audio tensors with optional cross-fade and silence gap.
 
     The helper now validates the input list and, when *dtype* is provided,
@@ -14,7 +14,7 @@ def concat_with_fade(chunks, sample_rate: int = 24000, fade_ms: int = 20, gap_ms
     sample_rate : int, optional
         Sample rate of the audio, by default 24000.
     fade_ms : int, optional
-        Duration of the crossfade in milliseconds, by default 20.
+        Duration of the crossfade in milliseconds, by default 60.
     gap_ms : int, optional
         Silence inserted between chunks in milliseconds, by default 0.
     dtype : torch.dtype | None, optional
