@@ -836,6 +836,19 @@ with gr.Blocks() as demo:
     refresh_btn = gr.Button("Refresh directories")
 
     with gr.Tabs():
+        with gr.Tab("Unified"):
+            with gr.Tabs():
+                with gr.Tab("Auto Pipeline"):
+                    auto_dataset = gr.Dropdown(choices=list_source_audio(), label="Dataset")
+                    auto_status = gr.Markdown()
+                    auto_prompt = gr.Textbox(label="Prompt")
+                    auto_btn = gr.Button("Run Pipeline")
+                    auto_log = gr.Textbox()
+                    auto_audio = gr.Audio(label="Output")
+
+                    auto_dataset.change(dataset_status, auto_dataset, auto_status)
+                    auto_btn.click(run_full_pipeline, [auto_dataset, auto_prompt], [auto_log, auto_audio])
+
         with gr.Tab("Main"):
             with gr.Tabs():
                 with gr.Tab("Prepare Dataset"):
@@ -988,16 +1001,7 @@ with gr.Blocks() as demo:
 
                     clear_btn.click(lambda: ("", None), None, [gallery, last_audio], queue=False)
 
-                with gr.Tab("Auto Pipeline"):
-                    auto_dataset = gr.Dropdown(choices=list_source_audio(), label="Dataset")
-                    auto_status = gr.Markdown()
-                    auto_prompt = gr.Textbox(label="Prompt")
-                    auto_btn = gr.Button("Run Pipeline")
-                    auto_log = gr.Textbox()
-                    auto_audio = gr.Audio(label="Output")
 
-                    auto_dataset.change(dataset_status, auto_dataset, auto_status)
-                    auto_btn.click(run_full_pipeline, [auto_dataset, auto_prompt], [auto_log, auto_audio])
 
         with gr.Tab("TESTING"):
             with gr.Tabs():
