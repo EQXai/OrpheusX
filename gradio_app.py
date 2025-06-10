@@ -489,30 +489,15 @@ def split_prompt_full(
     text: str,
     tokenizer,
     chars: list[str] | None = None,
-    max_tokens: int = 50,
-    min_tokens: int = 0,
     return_text: bool = False,
 ) -> list[torch.Tensor] | tuple[list[str], list[torch.Tensor]]:
-    """Split ``text`` at selected punctuation marks."""
+    """Split ``text`` at selected punctuation marks ignoring token limits."""
     if not chars:
         chars = [",", ".", "?", "!"]
     char_class = "".join(re.escape(c) for c in chars)
     pattern = rf"[^{char_class}]+(?:[{char_class}]+|$)"
-    parts = [p.strip() for p in re.findall(pattern, text.strip()) if p.strip()]
-    segments: list[str] = []
-    current: list[str] = []
-    for part in parts:
-        candidate = " ".join(current + [part])
-        token_len = len(tokenizer(candidate, add_special_tokens=False).input_ids)
-        if token_len > max_tokens and current:
-            segments.append(" ".join(current))
-            current = [part]
-        else:
-            current.append(part)
-    if current:
-        segments.append(" ".join(current))
+    segments = [p.strip() for p in re.findall(pattern, text.strip()) if p.strip()]
     token_segments = [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments]
-    segments, token_segments = _merge_short_segments(segments, token_segments, min_tokens)
     return (segments, token_segments) if return_text else token_segments
 
 
@@ -664,8 +649,6 @@ def generate_audio(
                 text,
                 tokenizer,
                 chars=seg_chars,
-                max_tokens=seg_max_tokens,
-                min_tokens=seg_min_tokens,
                 return_text=True,
             )
         else:
