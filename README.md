@@ -70,7 +70,7 @@ python scripts/orpheus_cli.py
 - Verify your environment with `python scripts/check_env.py` (checks packages, CUDA and ffmpeg)
 - The dataset helper lists audio files from `source_audio/` so you can pick them interactively
 - Segmentation mode prints the start and end index of each chunk so you know where text was split
-- Trained LoRA adapters are stored under `scripts/lora_models/<dataset>/lora_model`
+- Trained LoRA adapters are stored under `lora_models/<dataset>/lora_model`
 - Detailed logs for the CLI and Gradio interface are saved under `logs/orpheus.log`
 
 All features are available via an interactive command-line menu.

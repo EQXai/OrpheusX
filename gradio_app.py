@@ -26,8 +26,8 @@ from scripts.prepare_dataset import prepare_dataset
 
 REPO_ROOT = Path(__file__).resolve().parent
 DATASETS_DIR = REPO_ROOT / "datasets"
-# Match the CLI scripts which store LoRAs under ``scripts/lora_models``
-LORA_DIR = REPO_ROOT / "scripts" / "lora_models"
+# Match the CLI scripts which store LoRAs under ``lora_models``
+LORA_DIR = REPO_ROOT / "lora_models"
 PROMPT_LIST_DIR = REPO_ROOT / "prompt_list"
 SOURCE_AUDIO_DIR = REPO_ROOT / "source_audio"
 MAX_PROMPTS = 5
@@ -51,6 +51,20 @@ def list_prompt_files() -> list[str]:
     if not PROMPT_LIST_DIR.is_dir():
         return []
     return sorted([f.name for f in PROMPT_LIST_DIR.glob("*.json")])
+
+
+def load_prompts(file_name: str) -> list[str]:
+    """Return prompts from a JSON file under ``PROMPT_LIST_DIR``."""
+    path = PROMPT_LIST_DIR / file_name
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        logger.exception("Failed to load prompts from %s", path)
+        return []
+    if not isinstance(data, list):
+        return []
+    return [str(p) for p in data if isinstance(p, str)]
 
 
 def list_source_audio() -> list[str]:
@@ -943,24 +957,25 @@ with gr.Blocks() as demo:
 
                     def run_infer(*args):  # type: ignore
                         prompts: list[str] = []
-                        loras = args[MAX_PROMPTS + 1]
-                        temperature = float(args[MAX_PROMPTS + 2])
-                        top_p = float(args[MAX_PROMPTS + 3])
-                        rep_penalty = float(args[MAX_PROMPTS + 4])
-                        max_tokens = int(args[MAX_PROMPTS + 5])
-                        segment = bool(args[MAX_PROMPTS + 6])
-                        seg_method = args[MAX_PROMPTS + 7]
-                        seg_chars = args[MAX_PROMPTS + 8] or []
-                        seg_min = int(args[MAX_PROMPTS + 9] or 0)
-                        seg_max = int(args[MAX_PROMPTS + 10] or 50)
-                        seg_gap = float(args[MAX_PROMPTS + 11] or 0)
+                        base_idx = 2 + MAX_PROMPTS
+                        pfile = args[base_idx]
+                        loras = args[base_idx + 1]
+                        temperature = float(args[base_idx + 2])
+                        top_p = float(args[base_idx + 3])
+                        rep_penalty = float(args[base_idx + 4])
+                        max_tokens = int(args[base_idx + 5])
+                        segment = bool(args[base_idx + 6])
+                        seg_method = args[base_idx + 7]
+                        seg_chars = args[base_idx + 8] or []
+                        seg_min = int(args[base_idx + 9] or 0)
+                        seg_max = int(args[base_idx + 10] or 50)
+                        seg_gap = float(args[base_idx + 11] or 0)
                         if args[0] == "Manual":
                             num = int(args[1])
                             for box in args[2 : 2 + MAX_PROMPTS][:num]:
                                 if box:
                                     prompts.append(box)
                         else:
-                            pfile = args[2 + MAX_PROMPTS]
                             prompts = load_prompts(pfile)
                         return generate_batch(
                             prompts,
