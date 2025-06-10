@@ -106,14 +106,20 @@ token limit. Use `--segment` along with `--segment-by tokens` (default),
 chunked. Sentence segmentation usually produces smoother audio because pauses
 occur at natural boundaries. The `full_segment` mode splits on every comma,
 period, question mark or exclamation point, producing the smallest possible
-chunks. When splitting by sentences, commas are also considered separators. The
+chunks and ignoring the token count settings. When splitting by sentences,
+commas are also considered separators. The
 algorithm ignores consecutive commas and merges pieces shorter than three words
 with their neighbors so lists or short phrases aren't broken awkwardly. Enable
 sentence segmentation for long prompts with natural pause points.
 
 The Gradio interface lets you choose which punctuation characters trigger
 segmentation (comma, period, question mark and exclamation point) and specify a
-minimum and maximum token count for each segment.
+minimum and maximum token count for each segment. The limits are ignored when
+`full_segment` is selected.
+
+There is also a **Full Segment Test** tab in the web UI. This simplified
+interface exposes only character-based segmentation so you can verify how the
+`full_segment` mode splits prompts without any token settings.
 
 While generating audio, the CLI prints a segmentation log showing where each
 chunk starts and ends. After all segments are generated they are automatically
