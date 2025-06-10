@@ -835,294 +835,248 @@ with gr.Blocks() as demo:
 
     refresh_btn = gr.Button("Refresh directories")
 
-    with gr.Tab("Prepare Dataset"):
-        audio_input = gr.Audio(type="filepath", label="Upload audio")
-        local_audio = gr.Dropdown(choices=list_source_audio(), multiselect=True, label="Existing audio file(s)")
-        dataset_name = gr.Textbox(label="Dataset Name (for upload)")
-        segment_tokens = gr.Number(value=50, precision=0, label="Max tokens per segment", visible=False)
-        segment_duration = gr.Number(value=0, precision=1, label="Min seconds per segment", visible=False)
-        model_max_len = gr.Number(value=2048, precision=0, label="Model max length", visible=False)
-        prepare_btn = gr.Button("Prepare")
-        prepare_output = gr.Textbox()
-        prepare_btn.click(
-            prepare_datasets_ui,
-            [
-                audio_input,
-                dataset_name,
-                local_audio,
-            ],
-            prepare_output,
-        )
+    with gr.Tabs():
+        with gr.Tab("Unified"):
+            with gr.Tabs():
+                with gr.Tab("Auto Pipeline"):
+                    auto_dataset = gr.Dropdown(choices=list_source_audio(), label="Dataset")
+                    auto_status = gr.Markdown()
+                    auto_prompt = gr.Textbox(label="Prompt")
+                    auto_btn = gr.Button("Run Pipeline")
+                    auto_log = gr.Textbox()
+                    auto_audio = gr.Audio(label="Output")
 
-    with gr.Tab("Prepare Dataset (Tokens)"):
-        audio_input_tok = gr.Audio(type="filepath", label="Upload audio")
-        local_audio_tok = gr.Dropdown(choices=list_source_audio(), multiselect=True, label="Existing audio file(s)")
-        dataset_name_tok = gr.Textbox(label="Dataset Name (for upload)")
-        min_tokens_inp = gr.Number(value=0, precision=0, label="Min tokens per segment")
-        max_tokens_inp = gr.Number(value=50, precision=0, label="Max tokens per segment")
-        prepare_btn_tok = gr.Button("Prepare")
-        prepare_output_tok = gr.Textbox()
-        prepare_btn_tok.click(
-            prepare_datasets_ui,
-            [
-                audio_input_tok,
-                dataset_name_tok,
-                local_audio_tok,
-                min_tokens_inp,
-                max_tokens_inp,
-            ],
-            prepare_output_tok,
-        )
+                    auto_dataset.change(dataset_status, auto_dataset, auto_status)
+                    auto_btn.click(run_full_pipeline, [auto_dataset, auto_prompt], [auto_log, auto_audio])
 
-    with gr.Tab("Train LoRA"):
-        hf_input = gr.Textbox(label="HF dataset link (one per line)")
-        local_ds = gr.Dropdown(choices=dataset_choices, multiselect=True, label="Local dataset(s)")
-        model_max_len_train = gr.Number(value=2048, precision=0, label="Model max length", visible=False)
-        with gr.Accordion("Ajustes avanzados", open=False):
-            batch_size = gr.Number(value=1, precision=0, label="Batch size")
-            grad_steps = gr.Number(value=4, precision=0, label="Gradient accumulation")
-            warmup_steps = gr.Number(value=5, precision=0, label="Warmup steps")
-            max_steps = gr.Number(value=60, precision=0, label="Max steps")
-            epochs = gr.Number(value=1, precision=0, label="Epochs")
-            lr = gr.Number(value=2e-4, label="Learning rate")
-            log_steps = gr.Number(value=1, precision=0, label="Logging steps")
-            weight_decay = gr.Number(value=0.01, label="Weight decay")
-            optim = gr.Textbox(value="adamw_8bit", label="Optimizer")
-            scheduler = gr.Textbox(value="linear", label="LR scheduler type")
-        train_btn = gr.Button("Train")
-        train_output = gr.Textbox()
-        train_btn.click(
-            train_loras,
-            [
-                hf_input,
-                local_ds,
-                batch_size,
-                grad_steps,
-                warmup_steps,
-                max_steps,
-                epochs,
-                lr,
-                log_steps,
-                weight_decay,
-                optim,
-                scheduler,
-            ],
-            train_output,
-        )
-
-    with gr.Tab("Inference"):
-        mode = gr.Radio(["Manual", "Prompt List"], value="Manual", label="Prompt source")
-        num_prompts = gr.Number(value=1, precision=0, label="Number of prompts")
-        prompt_boxes = [gr.Textbox(label=f"Prompt {i+1}", visible=(i == 0)) for i in range(MAX_PROMPTS)]
-        prompt_list_dd = gr.Dropdown(choices=prompt_files, label="Prompt list", visible=False)
-        lora_used = gr.Dropdown(choices=["<base>"] + lora_choices, multiselect=True, label="LoRA(s)")
-        with gr.Accordion("Advanced Settings", open=False):
-            profile_sel = gr.Radio(
-                ["Short Audio", "Long Audio"],
-                value="Short Audio",
-                label="Preset",
-            )
-            temperature = gr.Slider(0.1, 1.5, value=0.6, label="Temperature")
-            top_p = gr.Slider(0.5, 1.0, value=0.95, label="Top P")
-            rep_penalty = gr.Slider(1.0, 2.0, value=1.1, label="Repetition Penalty")
-            max_tokens = gr.Number(value=1200, precision=0, label="Max New Tokens")
-            segment_chk = gr.Checkbox(label="Segment text")
-            segment_method = gr.Radio([
-                "tokens",
-                "sentence",
-                "full_segment",
-            ], value="tokens", label="Segment by")
-            segment_chars = gr.CheckboxGroup(
-                [",", ".", "?", "!"],
-                value=[",", ".", "?", "!"],
-                label="Segment characters",
-            )
-            seg_min_tokens = gr.Number(
-                value=0, precision=0, label="Min tokens per segment"
-            )
-            seg_max_tokens = gr.Number(
-                value=50, precision=0, label="Max tokens per segment"
-            )
-            seg_gap = gr.Number(
-                value=0.0, precision=1, label="Gap between segments (s)"
-            )
-
-            def apply_profile(preset):
-                if preset == "Long Audio":
-                    return (
-                        gr.update(value=2400),
-                        gr.update(value=True),
-                        gr.update(value="sentence"),
-                        gr.update(value=[",", ".", "?", "!"]),
-                        gr.update(value=0),
-                        gr.update(value=50),
-                        gr.update(value=0.0),
+        with gr.Tab("Main"):
+            with gr.Tabs():
+                with gr.Tab("Prepare Dataset"):
+                    audio_input = gr.Audio(type="filepath", label="Upload audio")
+                    local_audio = gr.Dropdown(choices=list_source_audio(), multiselect=True, label="Existing audio file(s)")
+                    dataset_name = gr.Textbox(label="Dataset Name (for upload)")
+                    segment_tokens = gr.Number(value=50, precision=0, label="Max tokens per segment", visible=False)
+                    segment_duration = gr.Number(value=0, precision=1, label="Min seconds per segment", visible=False)
+                    model_max_len = gr.Number(value=2048, precision=0, label="Model max length", visible=False)
+                    prepare_btn = gr.Button("Prepare")
+                    prepare_output = gr.Textbox()
+                    prepare_btn.click(
+                        prepare_datasets_ui,
+                        [
+                            audio_input,
+                            dataset_name,
+                            local_audio,
+                        ],
+                        prepare_output,
                     )
-                return (
-                    gr.update(value=1200),
-                    gr.update(value=False),
-                    gr.update(value="tokens"),
-                    gr.update(value=[",", ".", "?", "!"]),
-                    gr.update(value=0),
-                    gr.update(value=50),
-                    gr.update(value=0.0),
-                )
 
-            profile_sel.change(
-                apply_profile,
-                profile_sel,
-                [
-                    max_tokens,
-                    segment_chk,
-                    segment_method,
-                    segment_chars,
-                    seg_min_tokens,
-                    seg_max_tokens,
-                    seg_gap,
-                ],
-            )
-        infer_btn = gr.Button("Generate")
-        clear_btn = gr.Button("Clear Gallery")
-        gallery = gr.HTML(label="Outputs")
-        last_audio = gr.Audio(label="Last Audio")
+                with gr.Tab("Train LoRA"):
+                    hf_input = gr.Textbox(label="HF dataset link (one per line)")
+                    local_ds = gr.Dropdown(choices=dataset_choices, multiselect=True, label="Local dataset(s)")
+                    model_max_len_train = gr.Number(value=2048, precision=0, label="Model max length", visible=False)
+                    with gr.Accordion("Ajustes avanzados", open=False):
+                        batch_size = gr.Number(value=1, precision=0, label="Batch size")
+                        grad_steps = gr.Number(value=4, precision=0, label="Gradient accumulation")
+                        warmup_steps = gr.Number(value=5, precision=0, label="Warmup steps")
+                        max_steps = gr.Number(value=60, precision=0, label="Max steps")
+                        epochs = gr.Number(value=1, precision=0, label="Epochs")
+                        lr = gr.Number(value=2e-4, label="Learning rate")
+                        log_steps = gr.Number(value=1, precision=0, label="Logging steps")
+                        weight_decay = gr.Number(value=0.01, label="Weight decay")
+                        optim = gr.Textbox(value="adamw_8bit", label="Optimizer")
+                        scheduler = gr.Textbox(value="linear", label="LR scheduler type")
+                    train_btn = gr.Button("Train")
+                    train_output = gr.Textbox()
+                    train_btn.click(
+                        train_loras,
+                        [
+                            hf_input,
+                            local_ds,
+                            batch_size,
+                            grad_steps,
+                            warmup_steps,
+                            max_steps,
+                            epochs,
+                            lr,
+                            log_steps,
+                            weight_decay,
+                            optim,
+                            scheduler,
+                        ],
+                        train_output,
+                    )
 
-        def _update(mode_val, n_val):
-            n = int(n_val or 1)
-            updates = []
-            for i in range(MAX_PROMPTS):
-                updates.append(gr.update(visible=mode_val == "Manual" and i < n))
-            updates.append(gr.update(visible=mode_val == "Prompt List"))
-            return updates
+                with gr.Tab("Inference"):
+                    mode = gr.Radio(["Manual", "Prompt List"], value="Manual", label="Prompt source")
+                    num_prompts = gr.Number(value=1, precision=0, label="Number of prompts")
+                    prompt_boxes = [gr.Textbox(label=f"Prompt {i+1}", visible=(i == 0)) for i in range(MAX_PROMPTS)]
+                    prompt_list_dd = gr.Dropdown(choices=prompt_files, label="Prompt list", visible=False)
+                    lora_used = gr.Dropdown(choices=["<base>"] + lora_choices, multiselect=True, label="LoRA(s)")
+                    with gr.Accordion("Advanced Settings", open=False):
+                        profile_sel = gr.Radio(
+                            ["Short Audio", "Long Audio"],
+                            value="Short Audio",
+                            label="Preset",
+                        )
+                        temperature = gr.Slider(0.1, 1.5, value=0.6, label="Temperature")
+                        top_p = gr.Slider(0.5, 1.0, value=0.95, label="Top P")
+                        rep_penalty = gr.Slider(1.0, 2.0, value=1.1, label="Repetition Penalty")
+                        max_tokens = gr.Number(value=1200, precision=0, label="Max New Tokens")
+                        segment_chk = gr.Checkbox(label="Segment text")
+                        segment_method = gr.Radio([
+                            "tokens",
+                            "sentence",
+                            "full_segment",
+                        ], value="tokens", label="Segment by")
+                        segment_chars = gr.CheckboxGroup(
+                            [",", ".", "?", "!"],
+                            value=[",", ".", "?", "!"],
+                            label="Segment characters",
+                        )
+                        seg_min_tokens = gr.Number(value=0, precision=0, label="Min tokens per segment")
+                        seg_max_tokens = gr.Number(value=50, precision=0, label="Max tokens per segment")
+                        seg_gap = gr.Number(value=0.0, precision=1, label="Gap between segments (s)")
+                    infer_btn = gr.Button("Generate")
+                    clear_btn = gr.Button("Clear Gallery")
+                    gallery = gr.HTML(label="Outputs")
+                    last_audio = gr.Audio(label="Last Audio")
 
-        mode.change(_update, [mode, num_prompts], prompt_boxes + [prompt_list_dd])
-        num_prompts.change(_update, [mode, num_prompts], prompt_boxes + [prompt_list_dd])
+                    def run_infer(*args):  # type: ignore
+                        prompts: list[str] = []
+                        loras = args[MAX_PROMPTS + 1]
+                        temperature = float(args[MAX_PROMPTS + 2])
+                        top_p = float(args[MAX_PROMPTS + 3])
+                        rep_penalty = float(args[MAX_PROMPTS + 4])
+                        max_tokens = int(args[MAX_PROMPTS + 5])
+                        segment = bool(args[MAX_PROMPTS + 6])
+                        seg_method = args[MAX_PROMPTS + 7]
+                        seg_chars = args[MAX_PROMPTS + 8] or []
+                        seg_min = int(args[MAX_PROMPTS + 9] or 0)
+                        seg_max = int(args[MAX_PROMPTS + 10] or 50)
+                        seg_gap = float(args[MAX_PROMPTS + 11] or 0)
+                        if args[0] == "Manual":
+                            num = int(args[1])
+                            for box in args[2 : 2 + MAX_PROMPTS][:num]:
+                                if box:
+                                    prompts.append(box)
+                        else:
+                            pfile = args[2 + MAX_PROMPTS]
+                            prompts = load_prompts(pfile)
+                        return generate_batch(
+                            prompts,
+                            loras,
+                            temperature,
+                            top_p,
+                            rep_penalty,
+                            max_tokens,
+                            segment,
+                            seg_method,
+                            seg_chars,
+                            seg_min,
+                            seg_max,
+                            seg_gap,
+                        )
 
-        def run_infer(mode_val, n_val, *args):
-            prompts = []
-            if mode_val == "Prompt List" and args[MAX_PROMPTS]:
-                path = PROMPT_LIST_DIR / args[MAX_PROMPTS]
-                try:
-                    with open(path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    if isinstance(data, list):
-                        prompts = [str(x) for x in data]
-                except Exception:
-                    prompts = []
-            else:
-                n = int(n_val or 1)
-                prompts = [p for p in args[:MAX_PROMPTS][:n] if p]
-            loras = args[MAX_PROMPTS + 1] if len(args) > MAX_PROMPTS + 1 else []
-            temperature = args[MAX_PROMPTS + 2]
-            top_p = args[MAX_PROMPTS + 3]
-            rep_penalty = args[MAX_PROMPTS + 4]
-            max_tokens = int(args[MAX_PROMPTS + 5])
-            segment = args[MAX_PROMPTS + 6]
-            seg_method = args[MAX_PROMPTS + 7]
-            seg_chars = args[MAX_PROMPTS + 8] or []
-            seg_min = int(args[MAX_PROMPTS + 9] or 0)
-            seg_max = int(args[MAX_PROMPTS + 10] or 50)
-            seg_gap = float(args[MAX_PROMPTS + 11] or 0)
-            return generate_batch(
-                prompts,
-                loras,
-                temperature,
-                top_p,
-                rep_penalty,
-                max_tokens,
-                segment,
-                seg_method,
-                seg_chars,
-                seg_min,
-                seg_max,
-                seg_gap,
-            )
+                    infer_btn.click(
+                        run_infer,
+                        [
+                            mode,
+                            num_prompts,
+                            *prompt_boxes,
+                            prompt_list_dd,
+                            lora_used,
+                            temperature,
+                            top_p,
+                            rep_penalty,
+                            max_tokens,
+                            segment_chk,
+                            segment_method,
+                            segment_chars,
+                            seg_min_tokens,
+                            seg_max_tokens,
+                            seg_gap,
+                        ],
+                        [gallery, last_audio],
+                    )
 
-        infer_btn.click(
-            run_infer,
-            [
-                mode,
-                num_prompts,
-                *prompt_boxes,
-                prompt_list_dd,
-                lora_used,
-                temperature,
-                top_p,
-                rep_penalty,
-                max_tokens,
-                segment_chk,
-                segment_method,
-                segment_chars,
-                seg_min_tokens,
-                seg_max_tokens,
-                seg_gap,
-            ],
-            [gallery, last_audio],
-        )
-
-        clear_btn.click(lambda: ("", None), None, [gallery, last_audio], queue=False)
-
-    with gr.Tab("Full Segment Test"):
-        fs_prompt = gr.Textbox(label="Prompt")
-        fs_lora = gr.Dropdown(choices=["<base>"] + lora_choices, multiselect=True, label="LoRA(s)")
-        fs_chars = gr.CheckboxGroup([",", ".", "?", "!"], value=[",", ".", "?", "!"], label="Segment characters")
-        with gr.Accordion("Advanced Settings", open=False):
-            fs_temperature = gr.Slider(0.1, 1.5, value=0.6, label="Temperature")
-            fs_top_p = gr.Slider(0.5, 1.0, value=0.95, label="Top P")
-            fs_rep_penalty = gr.Slider(1.0, 2.0, value=1.1, label="Repetition Penalty")
-            fs_max_tokens = gr.Number(value=1200, precision=0, label="Max New Tokens")
-            fs_gap = gr.Number(value=0.0, precision=1, label="Gap between segments (s)")
-        fs_btn = gr.Button("Generate")
-        fs_clear = gr.Button("Clear Gallery")
-        fs_gallery = gr.HTML(label="Outputs")
-        fs_last_audio = gr.Audio(label="Last Audio")
-
-        def run_full_seg(prompt, loras, temp, top_p_val, rep, max_tok, seg_chars, gap):
-            return generate_batch(
-                [prompt] if prompt else [],
-                loras or [None],
-                temp,
-                top_p_val,
-                rep,
-                max_tok,
-                True,
-                "full_segment",
-                seg_chars or [],
-                0,
-                50,
-                gap,
-            )
-
-        fs_btn.click(
-            run_full_seg,
-            [
-                fs_prompt,
-                fs_lora,
-                fs_temperature,
-                fs_top_p,
-                fs_rep_penalty,
-                fs_max_tokens,
-                fs_chars,
-                fs_gap,
-            ],
-            [fs_gallery, fs_last_audio],
-        )
-
-        fs_clear.click(lambda: ("", None), None, [fs_gallery, fs_last_audio], queue=False)
-
-    with gr.Tab("Auto Pipeline"):
-        auto_dataset = gr.Dropdown(choices=list_source_audio(), label="Dataset")
-        auto_status = gr.Markdown()
-        auto_prompt = gr.Textbox(label="Prompt")
-        auto_btn = gr.Button("Run Pipeline")
-        auto_log = gr.Textbox()
-        auto_audio = gr.Audio(label="Output")
-
-        auto_dataset.change(dataset_status, auto_dataset, auto_status)
-        auto_btn.click(run_full_pipeline, [auto_dataset, auto_prompt], [auto_log, auto_audio])
-
-    refresh_btn.click(refresh_lists, None, [local_ds, lora_used, prompt_list_dd, local_audio, local_audio_tok, auto_dataset])
+                    clear_btn.click(lambda: ("", None), None, [gallery, last_audio], queue=False)
 
 
+        with gr.Tab("TESTING"):
+            with gr.Tabs():
+                with gr.Tab("Prepare Dataset (Tokens)"):
+                    audio_input_tok = gr.Audio(type="filepath", label="Upload audio")
+                    local_audio_tok = gr.Dropdown(choices=list_source_audio(), multiselect=True, label="Existing audio file(s)")
+                    dataset_name_tok = gr.Textbox(label="Dataset Name (for upload)")
+                    min_tokens_inp = gr.Number(value=0, precision=0, label="Min tokens per segment")
+                    max_tokens_inp = gr.Number(value=50, precision=0, label="Max tokens per segment")
+                    prepare_btn_tok = gr.Button("Prepare")
+                    prepare_output_tok = gr.Textbox()
+                    prepare_btn_tok.click(
+                        prepare_datasets_ui,
+                        [
+                            audio_input_tok,
+                            dataset_name_tok,
+                            local_audio_tok,
+                            min_tokens_inp,
+                            max_tokens_inp,
+                        ],
+                        prepare_output_tok,
+                    )
+
+                with gr.Tab("Full Segment Test"):
+                    fs_prompt = gr.Textbox(label="Prompt")
+                    fs_lora = gr.Dropdown(choices=["<base>"] + lora_choices, multiselect=True, label="LoRA(s)")
+                    fs_chars = gr.CheckboxGroup([",", ".", "?", "!"], value=[",", ".", "?", "!"], label="Segment characters")
+                    with gr.Accordion("Advanced Settings", open=False):
+                        fs_temperature = gr.Slider(0.1, 1.5, value=0.6, label="Temperature")
+                        fs_top_p = gr.Slider(0.5, 1.0, value=0.95, label="Top P")
+                        fs_rep_penalty = gr.Slider(1.0, 2.0, value=1.1, label="Repetition Penalty")
+                        fs_max_tokens = gr.Number(value=1200, precision=0, label="Max New Tokens")
+                        fs_gap = gr.Number(value=0.0, precision=1, label="Gap between segments (s)")
+                    fs_btn = gr.Button("Generate")
+                    fs_clear = gr.Button("Clear Gallery")
+                    fs_gallery = gr.HTML(label="Outputs")
+                    fs_last_audio = gr.Audio(label="Last Audio")
+
+                    def run_full_seg(prompt, loras, temp, top_p_val, rep, max_tok, seg_chars, gap):
+                        return generate_batch(
+                            [prompt] if prompt else [],
+                            loras or [None],
+                            temp,
+                            top_p_val,
+                            rep,
+                            max_tok,
+                            True,
+                            "full_segment",
+                            seg_chars or [],
+                            0,
+                            50,
+                            gap,
+                        )
+
+                    fs_btn.click(
+                        run_full_seg,
+                        [
+                            fs_prompt,
+                            fs_lora,
+                            fs_temperature,
+                            fs_top_p,
+                            fs_rep_penalty,
+                            fs_max_tokens,
+                            fs_chars,
+                            fs_gap,
+                        ],
+                        [fs_gallery, fs_last_audio],
+                    )
+
+                    fs_clear.click(lambda: ("", None), None, [fs_gallery, fs_last_audio], queue=False)
+
+    refresh_btn.click(
+        refresh_lists,
+        None,
+        [local_ds, lora_used, prompt_list_dd, local_audio, local_audio_tok, auto_dataset],
+    )
 if __name__ == "__main__":
     port_input = input("Which port should Gradio use? (default 7860): ")
     try:
