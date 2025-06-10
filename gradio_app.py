@@ -65,6 +65,8 @@ def prepare_datasets_ui(
     upload_file: str,
     name: str,
     existing: list[str] | None,
+    min_tokens: int = 0,
+    max_tokens: int | None = None,
 ) -> str:
     """Prepare one or more datasets from uploaded or existing audio files."""
     tasks: list[tuple[str, str]] = []
@@ -91,6 +93,8 @@ def prepare_datasets_ui(
             prepare_dataset(
                 audio_path,
                 str(out_dir),
+                min_tokens=min_tokens,
+                max_tokens=max_tokens,
             )
             msgs.append(f"{ds_name}: success")
             elapsed = time.perf_counter() - start
@@ -823,6 +827,7 @@ def refresh_lists() -> tuple:
         gr.update(choices=list_prompt_files()),
         gr.update(choices=list_source_audio()),
         gr.update(choices=list_source_audio()),
+        gr.update(choices=list_source_audio()),
     )
 
 with gr.Blocks() as demo:
@@ -847,6 +852,26 @@ with gr.Blocks() as demo:
                 local_audio,
             ],
             prepare_output,
+        )
+
+    with gr.Tab("Prepare Dataset (Tokens)"):
+        audio_input_tok = gr.Audio(type="filepath", label="Upload audio")
+        local_audio_tok = gr.Dropdown(choices=list_source_audio(), multiselect=True, label="Existing audio file(s)")
+        dataset_name_tok = gr.Textbox(label="Dataset Name (for upload)")
+        min_tokens_inp = gr.Number(value=0, precision=0, label="Min tokens per segment")
+        max_tokens_inp = gr.Number(value=50, precision=0, label="Max tokens per segment")
+        prepare_btn_tok = gr.Button("Prepare")
+        prepare_output_tok = gr.Textbox()
+        prepare_btn_tok.click(
+            prepare_datasets_ui,
+            [
+                audio_input_tok,
+                dataset_name_tok,
+                local_audio_tok,
+                min_tokens_inp,
+                max_tokens_inp,
+            ],
+            prepare_output_tok,
         )
 
     with gr.Tab("Train LoRA"):
@@ -1095,7 +1120,7 @@ with gr.Blocks() as demo:
         auto_dataset.change(dataset_status, auto_dataset, auto_status)
         auto_btn.click(run_full_pipeline, [auto_dataset, auto_prompt], [auto_log, auto_audio])
 
-    refresh_btn.click(refresh_lists, None, [local_ds, lora_used, prompt_list_dd, local_audio, auto_dataset])
+    refresh_btn.click(refresh_lists, None, [local_ds, lora_used, prompt_list_dd, local_audio, local_audio_tok, auto_dataset])
 
 
 if __name__ == "__main__":
