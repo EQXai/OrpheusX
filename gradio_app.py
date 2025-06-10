@@ -1036,6 +1036,54 @@ with gr.Blocks() as demo:
 
         clear_btn.click(lambda: ("", None), None, [gallery, last_audio], queue=False)
 
+    with gr.Tab("Full Segment Test"):
+        fs_prompt = gr.Textbox(label="Prompt")
+        fs_lora = gr.Dropdown(choices=["<base>"] + lora_choices, multiselect=True, label="LoRA(s)")
+        fs_chars = gr.CheckboxGroup([",", ".", "?", "!"], value=[",", ".", "?", "!"], label="Segment characters")
+        with gr.Accordion("Advanced Settings", open=False):
+            fs_temperature = gr.Slider(0.1, 1.5, value=0.6, label="Temperature")
+            fs_top_p = gr.Slider(0.5, 1.0, value=0.95, label="Top P")
+            fs_rep_penalty = gr.Slider(1.0, 2.0, value=1.1, label="Repetition Penalty")
+            fs_max_tokens = gr.Number(value=1200, precision=0, label="Max New Tokens")
+            fs_gap = gr.Number(value=0.0, precision=1, label="Gap between segments (s)")
+        fs_btn = gr.Button("Generate")
+        fs_clear = gr.Button("Clear Gallery")
+        fs_gallery = gr.HTML(label="Outputs")
+        fs_last_audio = gr.Audio(label="Last Audio")
+
+        def run_full_seg(prompt, loras, temp, top_p_val, rep, max_tok, seg_chars, gap):
+            return generate_batch(
+                [prompt] if prompt else [],
+                loras or [None],
+                temp,
+                top_p_val,
+                rep,
+                max_tok,
+                True,
+                "full_segment",
+                seg_chars or [],
+                0,
+                50,
+                gap,
+            )
+
+        fs_btn.click(
+            run_full_seg,
+            [
+                fs_prompt,
+                fs_lora,
+                fs_temperature,
+                fs_top_p,
+                fs_rep_penalty,
+                fs_max_tokens,
+                fs_chars,
+                fs_gap,
+            ],
+            [fs_gallery, fs_last_audio],
+        )
+
+        fs_clear.click(lambda: ("", None), None, [fs_gallery, fs_last_audio], queue=False)
+
     with gr.Tab("Auto Pipeline"):
         auto_dataset = gr.Dropdown(choices=list_source_audio(), label="Dataset")
         auto_status = gr.Markdown()

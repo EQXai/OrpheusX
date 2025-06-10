@@ -117,6 +117,10 @@ segmentation (comma, period, question mark and exclamation point) and specify a
 minimum and maximum token count for each segment. The limits are ignored when
 `full_segment` is selected.
 
+There is also a **Full Segment Test** tab in the web UI. This simplified
+interface exposes only character-based segmentation so you can verify how the
+`full_segment` mode splits prompts without any token settings.
+
 While generating audio, the CLI prints a segmentation log showing where each
 chunk starts and ends. After all segments are generated they are automatically
 crossfaded to hide the cuts.
