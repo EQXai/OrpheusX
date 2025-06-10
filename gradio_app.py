@@ -26,8 +26,8 @@ from scripts.prepare_dataset import prepare_dataset
 
 REPO_ROOT = Path(__file__).resolve().parent
 DATASETS_DIR = REPO_ROOT / "datasets"
-# Match the CLI scripts which store LoRAs under ``scripts/lora_models``
-LORA_DIR = REPO_ROOT / "scripts" / "lora_models"
+# Match the CLI scripts which store LoRAs under ``lora_models``
+LORA_DIR = REPO_ROOT / "lora_models"
 PROMPT_LIST_DIR = REPO_ROOT / "prompt_list"
 SOURCE_AUDIO_DIR = REPO_ROOT / "source_audio"
 MAX_PROMPTS = 5
