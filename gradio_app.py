@@ -955,6 +955,25 @@ with gr.Blocks() as demo:
                         seg_max_tokens = gr.Number(value=50, precision=0, label="Max tokens per segment")
                         seg_gap = gr.Number(value=0.0, precision=1, label="Gap between segments (s)")
                         fade_ms_inp = gr.Number(value=60, precision=0, label="Crossfade (ms)")
+
+                    def _apply_preset(preset: str):
+                        if preset == "Long Audio":
+                            return (
+                                gr.update(value=2400),
+                                gr.update(value=True),
+                                gr.update(value="sentence"),
+                            )
+                        return (
+                            gr.update(value=1200),
+                            gr.update(value=False),
+                            gr.update(value="tokens"),
+                        )
+
+                    profile_sel.change(
+                        _apply_preset,
+                        profile_sel,
+                        [max_tokens, segment_chk, segment_method],
+                    )
                     infer_btn = gr.Button("Generate")
                     clear_btn = gr.Button("Clear Gallery")
                     gallery = gr.HTML(label="Outputs")
@@ -965,17 +984,23 @@ with gr.Blocks() as demo:
                         base_idx = 2 + MAX_PROMPTS
                         pfile = args[base_idx]
                         loras = args[base_idx + 1]
-                        temperature = float(args[base_idx + 2])
-                        top_p = float(args[base_idx + 3])
-                        rep_penalty = float(args[base_idx + 4])
-                        max_tokens = int(args[base_idx + 5])
-                        segment = bool(args[base_idx + 6])
-                        seg_method = args[base_idx + 7]
-                        seg_chars = args[base_idx + 8] or []
-                        seg_min = int(args[base_idx + 9] or 0)
-                        seg_max = int(args[base_idx + 10] or 50)
-                        seg_gap = float(args[base_idx + 11] or 0)
-                        fade_ms = int(args[base_idx + 12] or 60)
+                        profile = args[base_idx + 2]
+                        temperature = float(args[base_idx + 3])
+                        top_p = float(args[base_idx + 4])
+                        rep_penalty = float(args[base_idx + 5])
+                        max_tokens = int(args[base_idx + 6])
+                        segment = bool(args[base_idx + 7])
+                        seg_method = args[base_idx + 8]
+                        seg_chars = args[base_idx + 9] or []
+                        seg_min = int(args[base_idx + 10] or 0)
+                        seg_max = int(args[base_idx + 11] or 50)
+                        seg_gap = float(args[base_idx + 12] or 0)
+                        fade_ms = int(args[base_idx + 13] or 60)
+
+                        if profile == "Long Audio":
+                            segment = True
+                            seg_method = "sentence"
+                            max_tokens = max(max_tokens, 2400)
                         if args[0] == "Manual":
                             num = int(args[1])
                             for box in args[2 : 2 + MAX_PROMPTS][:num]:
@@ -1007,6 +1032,7 @@ with gr.Blocks() as demo:
                             *prompt_boxes,
                             prompt_list_dd,
                             lora_used,
+                            profile_sel,
                             temperature,
                             top_p,
                             rep_penalty,
