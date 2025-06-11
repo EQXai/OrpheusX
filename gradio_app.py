@@ -27,6 +27,14 @@ os.environ.setdefault("VLLM_NO_USAGE_STATS", "1")
 os.environ.setdefault("VLLM_DO_NOT_TRACK", "1")
 os.environ.setdefault("GRADIO_ANALYTICS_ENABLED", "0")
 
+# Configure vLLM environment for long contexts and reduced logging
+os.environ.setdefault("VLLM_MAX_MODEL_LEN", "100000")
+os.environ.setdefault("VLLM_GPU_MEMORY_UTILIZATION", "0.9")
+os.environ.setdefault("VLLM_DISABLE_LOGGING", "1")
+os.environ.setdefault("VLLM_NO_USAGE_STATS", "1")
+os.environ.setdefault("VLLM_DO_NOT_TRACK", "1")
+os.environ.setdefault("GRADIO_ANALYTICS_ENABLED", "0")
+
 # Helper for audio concatenation with crossfade
 from audio_utils import concat_with_fade
 
@@ -902,8 +910,6 @@ def generate_long_form(
         yield ui_handler.pop(), str(path)
     finally:
         logger.removeHandler(ui_handler)
-
-
 
 def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tuple[str, str]:
     """Prepare dataset, train LoRA and run inference."""
