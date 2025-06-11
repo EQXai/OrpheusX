@@ -269,17 +269,18 @@ def train_lora_single(
         example['attention_mask'] = [1] * len(input_ids)
         return example
 
-    dataset = dataset.map(create_input_ids, remove_columns=['text', 'codes_list'])
+    dataset = dataset.map(create_input_ids, remove_columns=['codes_list', 'text_tokens'])
+    dataset = dataset.rename_column("text", "prompt")
+    dataset = dataset.map(
+        lambda x: {
+            "prompt": [{"role": "user", "content": f"<custom_token_3>{x['prompt']}"}],
+            "answer": "".join(
+                tokenizer.batch_decode(x["labels"][x["labels"].index(end_of_text) :])
+            ).replace("<|eot_id|>", "")
+        }
+    )
 
-    before_len = len(dataset)
-    dataset = dataset.filter(lambda x: len(x['input_ids']) <= 2048)
-    skipped = before_len - len(dataset)
-    if skipped:
-        print(f"Skipped {skipped} sample(s) exceeding 2048 tokens.")
 
-    columns_to_keep = ['input_ids', 'labels', 'attention_mask']
-    columns_to_remove = [col for col in dataset.column_names if col not in columns_to_keep]
-    dataset = dataset.remove_columns(columns_to_remove)
 
     trainer = Trainer(
         model=model,
@@ -393,9 +394,13 @@ def train_grpo_single(
     try:
         from trl import GRPOConfig, GRPOTrainer
         from vllm import SamplingParams
-    except Exception:
+    except Exception as exc:
         logger.error("GRPO dependencies not available")
-        return "GRPO training unavailable (missing dependencies)"
+        logger.error("Error: %s", exc)
+        return (
+            "GRPO training unavailable. Install `trl` and `vllm` plus speech "
+            "evaluation packages as shown in the GRPO notebook."
+        )
 
     logger.info("Training GRPO LoRA %s from %s", lora_name, dataset_source)
     start_time = time.perf_counter()
@@ -410,6 +415,11 @@ def train_grpo_single(
         dtype=None,
         load_in_4bit=False,
         cache_dir=str(CACHE_DIR),
+    )
+    tokenizer.chat_template = (
+        "{% for message in messages %}\n"
+        "{{ message['content'] }}\n"
+        "{% endfor %}\n"
     )
 
     model = FastLanguageModel.get_peft_model(
@@ -516,17 +526,16 @@ def train_grpo_single(
         example['attention_mask'] = [1] * len(input_ids)
         return example
 
-    dataset = dataset.map(create_input_ids, remove_columns=['text', 'codes_list'])
+    dataset = dataset.map(create_input_ids, remove_columns=['codes_list', 'text_tokens'])
+    dataset = dataset.rename_column("text", "prompt")
+    dataset = dataset.map(
+        lambda x: {
+            "prompt": [{"role": "user", "content": f"<custom_token_3>{x['prompt']}"}],
+            "answer": "".join(tokenizer.batch_decode(x["labels"][x["labels"].index(end_of_text) :])).replace("<|eot_id|>", ""),
+        }
+    )
 
-    before_len = len(dataset)
-    dataset = dataset.filter(lambda x: len(x['input_ids']) <= 2048)
-    skipped = before_len - len(dataset)
-    if skipped:
-        print(f"Skipped {skipped} sample(s) exceeding 2048 tokens.")
 
-    columns_to_keep = ['input_ids', 'labels', 'attention_mask']
-    columns_to_remove = [col for col in dataset.column_names if col not in columns_to_keep]
-    dataset = dataset.remove_columns(columns_to_remove)
 
     sp = SamplingParams()
     training_args = GRPOConfig(
