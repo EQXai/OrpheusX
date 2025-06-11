@@ -11,12 +11,21 @@ import os
 from pathlib import Path
 import json
 import re
+import asyncio
 import unsloth  # must be imported before transformers
 from transformers import AutoTokenizer
 import gradio as gr
 import gc
 import time
 from tools.logger_utils import get_logger
+
+# Configure vLLM environment for long contexts and reduced logging
+os.environ.setdefault("VLLM_MAX_MODEL_LEN", "100000")
+os.environ.setdefault("VLLM_GPU_MEMORY_UTILIZATION", "0.9")
+os.environ.setdefault("VLLM_DISABLE_LOGGING", "1")
+os.environ.setdefault("VLLM_NO_USAGE_STATS", "1")
+os.environ.setdefault("VLLM_DO_NOT_TRACK", "1")
+os.environ.setdefault("GRADIO_ANALYTICS_ENABLED", "0")
 
 # Helper for audio concatenation with crossfade
 from audio_utils import concat_with_fade
@@ -563,6 +572,9 @@ def generate_audio_segment(
     model,
     snac_model,
     max_new_tokens: int = 1200,
+    temperature: float = 0.6,
+    top_p: float = 0.95,
+    repetition_penalty: float = 1.1,
 ) -> torch.Tensor:
     logger.info("Generating segment with %d tokens", tokens.numel())
     t0 = time.perf_counter()
@@ -577,9 +589,9 @@ def generate_audio_segment(
         attention_mask=attn_cuda,
         max_new_tokens=max_new_tokens,
         do_sample=True,
-        temperature=0.6,
-        top_p=0.95,
-        repetition_penalty=1.1,
+        temperature=temperature,
+        top_p=top_p,
+        repetition_penalty=repetition_penalty,
         num_return_sequences=1,
         eos_token_id=128258,
         use_cache=True,
@@ -688,7 +700,13 @@ def generate_audio(
     final_audio = None
     for s in segments:
         part = generate_audio_segment(
-            s, model, snac_model, max_new_tokens=max_new_tokens
+            s,
+            model,
+            snac_model,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
         )
         if final_audio is None:
             final_audio = part
@@ -780,6 +798,98 @@ def dataset_status(name: str) -> str:
     ds_name = Path(name).stem
     lora_path = LORA_DIR / ds_name / "lora_model"
     return "Model already created" if lora_path.is_dir() else ""
+
+
+async def _generate_long_form_async(
+    segments: list[torch.Tensor],
+    model,
+    snac_model,
+    batch_size: int,
+    max_new_tokens: int,
+    temperature: float,
+    top_p: float,
+    repetition_penalty: float,
+    progress: gr.Progress | None = None,
+) -> list[torch.Tensor]:
+    """Generate audio segments concurrently respecting *batch_size*."""
+    semaphore = asyncio.Semaphore(batch_size)
+    results: list[torch.Tensor] = [None] * len(segments)  # type: ignore
+    loop = asyncio.get_event_loop()
+    completed = 0
+
+    async def process(idx: int, ids: torch.Tensor) -> None:
+        nonlocal completed
+        async with semaphore:
+            audio = await loop.run_in_executor(
+                None,
+                lambda: generate_audio_segment(
+                    ids,
+                    model,
+                    snac_model,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    repetition_penalty=repetition_penalty,
+                ),
+            )
+            results[idx] = audio
+            completed += 1
+            if progress is not None:
+                progress(completed / len(segments), desc=f"Chunk {completed}/{len(segments)}")
+
+    tasks = [process(i, seg) for i, seg in enumerate(segments)]
+    await asyncio.gather(*tasks)
+    return results
+
+
+def generate_long_form(
+    text: str,
+    lora_name: str | None,
+    temperature: float,
+    top_p: float,
+    repetition_penalty: float,
+    max_new_tokens: int,
+    batch_size: int = 4,
+    fade_ms: int = 60,
+) -> str:
+    """Generate long form audio by chunking and processing in parallel."""
+    model_name = MODEL_NAME
+    lora_path = None
+    if lora_name:
+        lora_path = LORA_DIR / lora_name / "lora_model"
+    model, tokenizer = load_model(model_name, str(lora_path) if lora_path else None)
+    snac_model = get_snac_model()
+
+    segments = split_prompt_by_sentences(text, tokenizer, max_tokens=300)
+    progress = gr.Progress()
+    audio_parts = asyncio.run(
+        _generate_long_form_async(
+            segments,
+            model,
+            snac_model,
+            batch_size,
+            max_new_tokens,
+            temperature,
+            top_p,
+            repetition_penalty,
+            progress,
+        )
+    )
+    final_audio = None
+    for part in audio_parts:
+        if final_audio is None:
+            final_audio = part
+        else:
+            final_audio = concat_with_fade([final_audio, part], fade_ms=fade_ms)
+    if final_audio is None:
+        return ""
+    path = get_output_path(lora_name or "base_model")
+    import torchaudio
+    torchaudio.save(str(path), final_audio.detach().cpu(), 24000)
+    torch.cuda.empty_cache()
+    gc.collect()
+    logger.info("Saved long form audio to %s", path)
+    return str(path)
 
 
 def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tuple[str, str]:
@@ -1024,6 +1134,42 @@ with gr.Blocks() as demo:
 
                     clear_btn.click(lambda: ("", None), None, [gallery, last_audio], queue=False)
 
+                with gr.Tab("Long Form"):
+                    lf_prompt = gr.Textbox(label="Text", lines=15)
+                    lf_lora = gr.Dropdown(choices=["<base>"] + lora_choices, label="LoRA")
+                    lf_batch = gr.Slider(1, 10, value=4, step=1, label="Batch Size")
+                    with gr.Accordion("Advanced Settings", open=False):
+                        lf_temp = gr.Slider(0.1, 1.5, value=0.6, label="Temperature")
+                        lf_top_p = gr.Slider(0.5, 1.0, value=0.95, label="Top P")
+                        lf_rep = gr.Slider(1.0, 2.0, value=1.1, label="Repetition Penalty")
+                        lf_max_tok = gr.Number(value=4096, precision=0, label="Max New Tokens")
+                        lf_fade = gr.Number(value=60, precision=0, label="Crossfade (ms)")
+                    lf_btn = gr.Button("Generate")
+                    lf_audio = gr.Audio(label="Output")
+
+                    lf_btn.click(
+                        lambda *args: generate_long_form(
+                            args[0],
+                            None if args[1] == "<base>" else args[1],
+                            args[3],
+                            args[4],
+                            args[5],
+                            int(args[6]),
+                            int(args[2]),
+                            int(args[7]),
+                        ),
+                        [
+                            lf_prompt,
+                            lf_lora,
+                            lf_batch,
+                            lf_temp,
+                            lf_top_p,
+                            lf_rep,
+                            lf_max_tok,
+                            lf_fade,
+                        ],
+                        lf_audio,
+                    )
 
 
         with gr.Tab("TESTING"):

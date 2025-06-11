@@ -57,9 +57,12 @@ def train():
 def infer():
     multi = input("Run inference on multiple models? (y/N): ").strip().lower() == "y"
     segment = input("Segment prompts every 50 tokens? (y/N): ").strip().lower() == "y"
+    long_form = input("Use long form mode? (y/N): ").strip().lower() == "y"
     cmd = ["python", "infer_interactive.py"]
     if segment:
         cmd.append("--segment")
+    if long_form:
+        cmd.append("--long_form")
     while True:
         run_script(cmd)
         if not multi:
