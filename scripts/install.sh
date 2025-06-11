@@ -17,10 +17,12 @@ fi
 source "$VENV_DIR/bin/activate"
 
 pip install --upgrade pip setuptools wheel
+pip install --upgrade cython
 pip install bitsandbytes accelerate xformers==0.0.29.post3 peft trl==0.15.2 triton cut_cross_entropy unsloth_zoo sentencepiece protobuf "datasets>=3.4.1" huggingface_hub hf_transfer transformers==4.51.3 unsloth snac torchaudio ipython librosa soundfile whisperx gradio
 
 # Install project requirements including GRPO extras
 pip install -r requirements.txt
+pip install --no-build-isolation git+https://github.com/wenet-e2e/wespeaker.git
 
 if command -v apt-get >/dev/null; then
   apt-get update && apt-get install -y ffmpeg

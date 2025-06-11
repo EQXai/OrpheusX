@@ -12,7 +12,6 @@ librosa
 evaluate
 jiwer
 # git repo for wespeaker
-wespeaker @ git+https://github.com/wenet-e2e/wespeaker.git
 cloudpickle
 openai
 py-cpuinfo

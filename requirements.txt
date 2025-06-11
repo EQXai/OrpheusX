@@ -30,7 +30,6 @@ soundfile
 librosa
 evaluate
 jiwer
-wespeaker @ git+https://github.com/wenet-e2e/wespeaker.git
 cloudpickle
 openai
 py-cpuinfo
