@@ -59,7 +59,7 @@ python scripts/orpheus_cli.py
 - Create WhisperX datasets with segments between 15 and 25 seconds long
 - Train LoRA models
 - Train GRPO LoRA models using `scripts/train_grpo.py`
-- Additional GRPO dependencies are required. See `notebooks/Orpheus_(3B)_TTS_GRPO.ipynb` for install commands.
+- Install extra GRPO dependencies from `requirements_grpo.txt`
 - Run inference
 - Each audio clip aligns exactly with its transcript while staying in the 15–25 second range.
 - Datasets are saved under `datasets/<name>` and include a standalone `dataset.parquet` file

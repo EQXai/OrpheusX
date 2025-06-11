@@ -19,6 +19,11 @@ source "$VENV_DIR/bin/activate"
 pip install --upgrade pip
 pip install bitsandbytes accelerate xformers==0.0.29.post3 peft trl==0.15.2 triton cut_cross_entropy unsloth_zoo sentencepiece protobuf "datasets>=3.4.1" huggingface_hub hf_transfer transformers==4.51.3 unsloth snac torchaudio ipython librosa soundfile whisperx gradio
 
+# Optional: install GRPO extras
+if [ -f requirements_grpo.txt ]; then
+  pip install -r requirements_grpo.txt || true
+fi
+
 if command -v apt-get >/dev/null; then
   apt-get update && apt-get install -y ffmpeg
 fi

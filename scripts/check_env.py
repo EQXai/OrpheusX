@@ -26,6 +26,17 @@ REQUIRED_PACKAGES = [
     "whisperx",
     "soundfile",
     "librosa",
+    "vllm",
+    "evaluate",
+    "jiwer",
+    "wespeaker",
+    "cloudpickle",
+    "openai",
+    "cpuinfo",
+    "llguidance",
+    "xgrammar",
+    "torchmetrics",
+    "audiobox_aesthetics",
 ]
 
 def check_virtual_env():
