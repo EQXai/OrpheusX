@@ -24,7 +24,7 @@ cd OrpheusX
 Installation script:
 
 ```bash
-python scripts/install.sh
+bash scripts/install.sh
 ```
 
 Activate venv::
@@ -36,6 +36,16 @@ source venv/bin/activate
 Everything else (installation, dataset creation, training, inference) is handled interactively through the CLI.
 
 To start:
+
+## 🌐 Gradio Interface
+
+If you prefer a simple web UI instead of the CLI, run:
+
+```bash
+python gradio_app.py
+```
+
+## 🌐 Terminal CLI
 
 ```bash
 python scripts/orpheus_cli.py
@@ -78,13 +88,6 @@ All features are available via an interactive command-line menu.
 
 ---
 
-## 🌐 Gradio Interface (UNDER DEVELOPMENT)
-
-If you prefer a simple web UI instead of the CLI, run:
-
-```bash
-python gradio_app.py
-```
 The script will ask which port you want to use before launching.
 The web UI lets you prepare datasets, train LoRAs and run inference.
 Training and inference tabs include dropdowns listing local datasets or
