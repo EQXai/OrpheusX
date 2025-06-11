@@ -356,6 +356,7 @@ def create_ui():
                                 label="Repetition Penalty"
                             )
 
+
                         submit_btn = gr.Button("Generate Speech", variant="primary")
                         gr.Examples(
                             examples=[
