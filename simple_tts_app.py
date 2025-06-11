@@ -1,5 +1,13 @@
 import gradio as gr
-from orpheus_tts import OrpheusModel
+try:
+    from orpheus_speech import OrpheusModel
+except ImportError:
+    try:
+        from orpheus_tts import OrpheusModel  # fallback for older package name
+    except ImportError as exc:
+        raise ImportError(
+            "The 'orpheus-speech' package is required to run this app."
+        ) from exc
 import wave
 import time
 import os
@@ -347,13 +355,7 @@ def create_ui():
                                 step=0.1,
                                 label="Repetition Penalty"
                             )
-                        max_tokens = gr.Slider(
-                    minimum=1200,
-                    maximum=3600,
-                    value=1200,
-                    step=100,
-                    label="Max Tokens"
-                )
+
 
                         submit_btn = gr.Button("Generate Speech", variant="primary")
                         gr.Examples(
