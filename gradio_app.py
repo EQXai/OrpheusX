@@ -962,6 +962,8 @@ def refresh_lists() -> tuple:
         gr.update(choices=list_source_audio()),
         gr.update(choices=list_source_audio()),
         gr.update(choices=list_source_audio()),
+        # Also refresh the Long Form LoRA dropdown
+        gr.update(choices=["<base>"] + list_loras()),
     )
 
 with gr.Blocks() as demo:
@@ -1254,7 +1256,15 @@ with gr.Blocks() as demo:
     refresh_btn.click(
         refresh_lists,
         None,
-        [local_ds, lora_used, prompt_list_dd, local_audio, local_audio_tok, auto_dataset],
+        [
+            local_ds,
+            lora_used,
+            prompt_list_dd,
+            local_audio,
+            local_audio_tok,
+            auto_dataset,
+            lf_lora,
+        ],
     )
 if __name__ == "__main__":
     port_input = input("Which port should Gradio use? (default 7860): ")
