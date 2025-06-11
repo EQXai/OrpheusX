@@ -9,6 +9,7 @@ transformers
 unsloth
 peft
 snac
+orpheus-speech
 
 # Data
 datasets
