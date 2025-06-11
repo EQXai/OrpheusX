@@ -862,19 +862,25 @@ def generate_long_form(
 
     segments = split_prompt_by_sentences(text, tokenizer, max_tokens=300)
     progress = gr.Progress()
-    audio_parts = asyncio.run(
-        _generate_long_form_async(
-            segments,
-            model,
-            snac_model,
-            batch_size,
-            max_new_tokens,
-            temperature,
-            top_p,
-            repetition_penalty,
-            progress,
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        audio_parts = loop.run_until_complete(
+            _generate_long_form_async(
+                segments,
+                model,
+                snac_model,
+                batch_size,
+                max_new_tokens,
+                temperature,
+                top_p,
+                repetition_penalty,
+                progress,
+            )
         )
-    )
+    finally:
+        asyncio.set_event_loop(None)
+        loop.close()
     final_audio = None
     for part in audio_parts:
         if final_audio is None:
