@@ -14,6 +14,7 @@ import torchaudio
 import re
 import gc
 import time
+import asyncio
 from unsloth import FastLanguageModel
 from snac import SNAC
 from peft import PeftModel
@@ -26,6 +27,13 @@ if repo_root not in sys.path:
 
 from audio_utils import concat_with_fade
 
+# Configure vLLM environment for long contexts and no telemetry
+os.environ.setdefault("VLLM_MAX_MODEL_LEN", "100000")
+os.environ.setdefault("VLLM_GPU_MEMORY_UTILIZATION", "0.9")
+os.environ.setdefault("VLLM_DISABLE_LOGGING", "1")
+os.environ.setdefault("VLLM_NO_USAGE_STATS", "1")
+os.environ.setdefault("VLLM_DO_NOT_TRACK", "1")
+
 CACHE_DIR = os.path.join(os.path.dirname(__file__), '..', 'models')
 
 def load_model(model_name, lora_path=None):
@@ -37,8 +45,14 @@ def load_model(model_name, lora_path=None):
         cache_dir=CACHE_DIR,
     )
     if lora_path and os.path.isdir(lora_path):
-        model = PeftModel.from_pretrained(model, lora_path)
-    FastLanguageModel.for_inference(model)
+        if hasattr(model, "load_lora"):
+            model.load_lora(lora_path)
+        else:
+            model = PeftModel.from_pretrained(model, lora_path)
+    if hasattr(model, "for_inference"):
+        model.for_inference()
+    else:
+        FastLanguageModel.for_inference(model)
     return model, tokenizer
 
 def get_output_path(lora_name: str, ext: str = ".wav") -> str:
@@ -128,6 +142,9 @@ def generate_audio_segment(
     model,
     snac_model,
     max_new_tokens: int = 1200,
+    temperature: float = 0.6,
+    top_p: float = 0.95,
+    repetition_penalty: float = 1.1,
 ) -> torch.Tensor:
     """Generate audio for a single token chunk and return as 1D tensor."""
     start_token = torch.tensor([[128259]], dtype=torch.int64)
@@ -141,9 +158,9 @@ def generate_audio_segment(
         attention_mask=attn_cuda,
         max_new_tokens=max_new_tokens,
         do_sample=True,
-        temperature=0.6,
-        top_p=0.95,
-        repetition_penalty=1.1,
+        temperature=temperature,
+        top_p=top_p,
+        repetition_penalty=repetition_penalty,
         num_return_sequences=1,
         eos_token_id=128258,
         use_cache=True,
@@ -190,6 +207,80 @@ def generate_audio_segment(
     return samples[0].squeeze(0)
 
 
+async def _generate_long_form_async(
+    segments: list[torch.Tensor],
+    model,
+    snac_model,
+    batch_size: int,
+    max_new_tokens: int,
+    temperature: float,
+    top_p: float,
+    repetition_penalty: float,
+) -> list[torch.Tensor]:
+    """Generate audio segments concurrently respecting *batch_size*."""
+    semaphore = asyncio.Semaphore(batch_size)
+    results: list[torch.Tensor] = [None] * len(segments)  # type: ignore
+    loop = asyncio.get_event_loop()
+
+    async def process(i: int, ids: torch.Tensor) -> None:
+        async with semaphore:
+            audio = await loop.run_in_executor(
+                None,
+                lambda: generate_audio_segment(
+                    ids,
+                    model,
+                    snac_model,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    repetition_penalty=repetition_penalty,
+                ),
+            )
+            results[i] = audio
+
+    await asyncio.gather(*(process(i, seg) for i, seg in enumerate(segments)))
+    return results
+
+
+def generate_long_form(
+    text: str,
+    model,
+    tokenizer,
+    snac_model,
+    temperature: float,
+    top_p: float,
+    repetition_penalty: float,
+    max_new_tokens: int,
+    batch_size: int,
+    fade_ms: int,
+) -> torch.Tensor | None:
+    """Generate long form audio by chunking and processing in parallel."""
+    # Split text using a conservative token limit for more natural phrasing
+    segments = split_prompt_by_sentences(text, tokenizer, max_tokens=50)
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        audio_parts = loop.run_until_complete(
+            _generate_long_form_async(
+                segments,
+                model,
+                snac_model,
+                batch_size,
+                max_new_tokens,
+                temperature,
+                top_p,
+                repetition_penalty,
+            )
+        )
+    finally:
+        asyncio.set_event_loop(None)
+        loop.close()
+    final = None
+    for part in audio_parts:
+        final = part if final is None else concat_with_fade([final, part], fade_ms=fade_ms)
+    return final
+
+
 def main():
     parser = argparse.ArgumentParser(description="Interactive inference")
     parser.add_argument(
@@ -214,6 +305,35 @@ def main():
         type=int,
         default=60,
         help="Crossfade duration in milliseconds",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.6,
+        help="Generation temperature",
+    )
+    parser.add_argument(
+        "--top_p",
+        type=float,
+        default=0.95,
+        help="Top-p sampling",
+    )
+    parser.add_argument(
+        "--repetition_penalty",
+        type=float,
+        default=1.1,
+        help="Repetition penalty",
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=4,
+        help="Concurrent chunk batch size for long form mode",
+    )
+    parser.add_argument(
+        "--long_form",
+        action="store_true",
+        help="Enable asynchronous long form generation",
     )
     args = parser.parse_args()
 
@@ -309,26 +429,49 @@ def main():
         model, tokenizer = load_model(model_name, lora_path)
 
         for text in prompts:
-            if segment_choice:
-                if args.segment_by == "sentence":
-                    seg_text, segments = split_prompt_by_sentences(text, tokenizer, return_text=True)
-                else:
-                    seg_text, segments = split_prompt_by_tokens(text, tokenizer, return_text=True)
-                print_segment_log(text, seg_text)
-            else:
-                segments = [tokenizer(text, return_tensors="pt").input_ids.squeeze(0)]
-            start_time = time.perf_counter()
-            final_audio = None
-            for ids in segments:
-                part = generate_audio_segment(
-                    ids, model, snac_model, max_new_tokens=args.max_tokens
+            if args.long_form:
+                start_time = time.perf_counter()
+                final_audio = generate_long_form(
+                    text,
+                    model,
+                    tokenizer,
+                    snac_model,
+                    args.temperature,
+                    args.top_p,
+                    args.repetition_penalty,
+                    args.max_tokens,
+                    args.batch_size,
+                    args.fade_ms,
                 )
-                if final_audio is None:
-                    final_audio = part
-                else:
-                    final_audio = concat_with_fade([final_audio, part], fade_ms=args.fade_ms)
                 torch.cuda.empty_cache()
                 gc.collect()
+            else:
+                if segment_choice:
+                    if args.segment_by == "sentence":
+                        seg_text, segments = split_prompt_by_sentences(text, tokenizer, return_text=True)
+                    else:
+                        seg_text, segments = split_prompt_by_tokens(text, tokenizer, return_text=True)
+                    print_segment_log(text, seg_text)
+                else:
+                    segments = [tokenizer(text, return_tensors="pt").input_ids.squeeze(0)]
+                start_time = time.perf_counter()
+                final_audio = None
+                for ids in segments:
+                    part = generate_audio_segment(
+                        ids,
+                        model,
+                        snac_model,
+                        max_new_tokens=args.max_tokens,
+                        temperature=args.temperature,
+                        top_p=args.top_p,
+                        repetition_penalty=args.repetition_penalty,
+                    )
+                    if final_audio is None:
+                        final_audio = part
+                    else:
+                        final_audio = concat_with_fade([final_audio, part], fade_ms=args.fade_ms)
+                    torch.cuda.empty_cache()
+                    gc.collect()
             if final_audio is None:
                 continue
             elapsed = time.perf_counter() - start_time
