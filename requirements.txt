@@ -18,4 +18,24 @@ pandas
 gradio
 
 # Testing & tooling (optional)
-pytest 
+pytest
+# GRPO training dependencies
+vllm
+msgspec
+blake3
+fastapi
+gguf
+wandb
+soundfile
+librosa
+evaluate
+jiwer
+wespeaker @ git+https://github.com/wenet-e2e/wespeaker.git
+cloudpickle
+openai
+py-cpuinfo
+llguidance
+xgrammar
+numpy==1.24
+torchmetrics[audio]
+audiobox_aesthetics
