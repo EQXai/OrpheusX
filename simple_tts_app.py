@@ -36,12 +36,19 @@ def load_model(model_name=model_name):
         return True
     except Exception as e:
         logger.error(f"Error loading model: {str(e)}")
+        logger.error(
+            "Make sure you have accepted the model's license on Hugging Face "
+            "and run `huggingface-cli login` to authenticate."
+        )
         return False
 
 def generate_speech(prompt, voice, temperature, top_p, repetition_penalty, max_tokens):
     """Generate speech for a single text input."""
     if model is None:
-        load_model()
+        if not load_model():
+            raise RuntimeError(
+                "Model could not be loaded. Ensure you have access to the repository and are authenticated with Hugging Face."
+            )
     
     # Start timing
     start_time = time.monotonic()
@@ -248,7 +255,10 @@ async def generate_long_form_speech_async(long_text, voice, temperature, top_p, 
 def generate_long_form_speech(long_text, voice, temperature, top_p, repetition_penalty, batch_size=4, max_tokens=4096, progress=gr.Progress()):
     """Generate speech for long-form text by chunking and processing in parallel batches."""
     if model is None:
-        load_model()
+        if not load_model():
+            raise RuntimeError(
+                "Model could not be loaded. Ensure you have access to the repository and are authenticated with Hugging Face."
+            )
 
     # Use asyncio to run the async function
     loop = asyncio.new_event_loop()

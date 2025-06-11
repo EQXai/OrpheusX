@@ -33,6 +33,16 @@ Activate venv::
 source venv/bin/activate
 ```
 
+Before running the web UI or CLI, authenticate with Hugging Face so the
+application can download the TTS models:
+
+```bash
+huggingface-cli login
+```
+
+Make sure the account you log in with has access to the
+`canopylabs/orpheus-tts-0.1-finetune-prod` repository.
+
 Everything else (installation, dataset creation, training, inference) is handled interactively through the CLI.
 
 To start:
