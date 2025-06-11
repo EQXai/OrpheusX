@@ -43,7 +43,10 @@ def load_model(model_name, lora_path=None):
         cache_dir=CACHE_DIR,
     )
     if lora_path and os.path.isdir(lora_path):
-        model = PeftModel.from_pretrained(model, lora_path)
+        if hasattr(model, "load_lora"):
+            model.load_lora(lora_path)
+        else:
+            model = PeftModel.from_pretrained(model, lora_path)
     FastLanguageModel.for_inference(model)
     return model, tokenizer
 
