@@ -416,7 +416,10 @@ def load_model(base_model: str, lora_path: str | None):
             model.load_lora(lora_path)
         else:
             model = PeftModel.from_pretrained(model, lora_path)
-    FastLanguageModel.for_inference(model)
+    if hasattr(model, "for_inference"):
+        model.for_inference()
+    else:
+        FastLanguageModel.for_inference(model)
 
     _LOADED_MODEL_NAME = base_model
     _LOADED_LORA_PATH = lora_path
@@ -580,6 +583,8 @@ def generate_audio_segment(
     repetition_penalty: float = 1.1,
 ) -> torch.Tensor:
     logger.info("Generating segment with %d tokens", tokens.numel())
+    if hasattr(model, "for_inference"):
+        model.for_inference()
     t0 = time.perf_counter()
     start_token = torch.tensor([[128259]], dtype=torch.int64)
     end_tokens = torch.tensor([[128009, 128260]], dtype=torch.int64)
@@ -814,34 +819,26 @@ async def _generate_long_form_async(
     repetition_penalty: float,
     progress: gr.Progress | None = None,
 ) -> list[torch.Tensor]:
-    """Generate audio segments concurrently respecting *batch_size*."""
-    semaphore = asyncio.Semaphore(batch_size)
-    results: list[torch.Tensor] = [None] * len(segments)  # type: ignore
+    """Generate audio segments sequentially."""
+    results: list[torch.Tensor] = []
     loop = asyncio.get_event_loop()
-    completed = 0
-
-    async def process(idx: int, ids: torch.Tensor) -> None:
-        nonlocal completed
-        async with semaphore:
-            audio = await loop.run_in_executor(
-                None,
-                lambda: generate_audio_segment(
-                    ids,
-                    model,
-                    snac_model,
-                    max_new_tokens=max_new_tokens,
-                    temperature=temperature,
-                    top_p=top_p,
-                    repetition_penalty=repetition_penalty,
-                ),
-            )
-            results[idx] = audio
-            completed += 1
-            if progress is not None:
-                progress(completed / len(segments), desc=f"Chunk {completed}/{len(segments)}")
-
-    tasks = [process(i, seg) for i, seg in enumerate(segments)]
-    await asyncio.gather(*tasks)
+    total = len(segments)
+    for idx, seg in enumerate(segments, 1):
+        audio = await loop.run_in_executor(
+            None,
+            lambda: generate_audio_segment(
+                seg,
+                model,
+                snac_model,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+            ),
+        )
+        results.append(audio)
+        if progress is not None:
+            progress(idx / total, desc=f"Chunk {idx}/{total}")
     return results
 
 

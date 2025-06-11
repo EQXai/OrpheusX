@@ -47,7 +47,10 @@ def load_model(model_name, lora_path=None):
             model.load_lora(lora_path)
         else:
             model = PeftModel.from_pretrained(model, lora_path)
-    FastLanguageModel.for_inference(model)
+    if hasattr(model, "for_inference"):
+        model.for_inference()
+    else:
+        FastLanguageModel.for_inference(model)
     return model, tokenizer
 
 
