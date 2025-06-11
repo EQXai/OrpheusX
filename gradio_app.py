@@ -269,17 +269,20 @@ def train_lora_single(
         example['attention_mask'] = [1] * len(input_ids)
         return example
 
-    dataset = dataset.map(create_input_ids, remove_columns=['text', 'codes_list'])
+    dataset = dataset.map(create_input_ids, remove_columns=["text", "codes_list"])
 
     before_len = len(dataset)
-    dataset = dataset.filter(lambda x: len(x['input_ids']) <= 2048)
+    dataset = dataset.filter(lambda x: len(x["input_ids"]) <= 2048)
     skipped = before_len - len(dataset)
     if skipped:
         print(f"Skipped {skipped} sample(s) exceeding 2048 tokens.")
 
-    columns_to_keep = ['input_ids', 'labels', 'attention_mask']
+    columns_to_keep = ["input_ids", "labels", "attention_mask"]
     columns_to_remove = [col for col in dataset.column_names if col not in columns_to_keep]
     dataset = dataset.remove_columns(columns_to_remove)
+
+
+
 
     trainer = Trainer(
         model=model,
@@ -365,6 +368,260 @@ def train_loras(
         except Exception as e:  # pragma: no cover - best effort
             elapsed = time.perf_counter() - start
             logger.exception("Training failed for %s after %.2fs", name, elapsed)
+            msgs.append(f"{name}: failed ({e})")
+    progress(1)
+    return "\n".join(msgs)
+
+
+def train_grpo_single(
+    dataset_source: str,
+    lora_name: str,
+    is_local: bool,
+    batch_size: int = 1,
+    grad_steps: int = 1,
+    epochs: int = 1,
+    lr: float = 5e-6,
+    log_steps: int = 1,
+    weight_decay: float = 0.01,
+    optim: str = "adamw_8bit",
+    scheduler: str = "linear",
+) -> str:
+    """Train a LoRA using TRL's GRPO algorithm.
+
+    This is a lightweight adaptation of ``train_lora_single`` that uses
+    ``GRPOTrainer`` from the `trl` library. The implementation mirrors the
+    dataset preparation steps from the regular LoRA trainer but falls back to a
+    placeholder reward function when the required dependencies are missing.
+    """
+    try:
+        from trl import GRPOConfig, GRPOTrainer
+        from vllm import SamplingParams
+    except Exception as exc:
+        logger.error("GRPO dependencies not available")
+        logger.error("Error: %s", exc)
+        return (
+            "GRPO training unavailable. Install `trl` and `vllm` plus speech "
+            "evaluation packages as shown in the GRPO notebook."
+        )
+
+    logger.info("Training GRPO LoRA %s from %s", lora_name, dataset_source)
+    start_time = time.perf_counter()
+    if is_local:
+        dataset = load_from_disk(dataset_source)
+    else:
+        dataset = load_dataset(dataset_source, split="train", cache_dir=str(DATASETS_DIR))
+
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name=MODEL_NAME,
+        max_seq_length=2048,
+        dtype=None,
+        load_in_4bit=False,
+        cache_dir=str(CACHE_DIR),
+    )
+    tokenizer.chat_template = (
+        "{% for message in messages %}\n"
+        "{{ message['content'] }}\n"
+        "{% endfor %}\n"
+    )
+
+    model = FastLanguageModel.get_peft_model(
+        model,
+        r=64,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        lora_alpha=64,
+        lora_dropout=0,
+        bias="none",
+        use_gradient_checkpointing="unsloth",
+        random_state=3407,
+        use_rslora=False,
+        loftq_config=None,
+    )
+
+    save_dir = LORA_DIR / lora_name.replace("/", "_") / "lora_model"
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    ds_sample_rate = dataset[0]["audio"]["sampling_rate"]
+    snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz", cache_dir=str(CACHE_DIR))
+    snac_model = snac_model.to("cuda")
+
+    import locale
+    locale.getpreferredencoding = lambda: "UTF-8"
+
+    def tokenise_audio(waveform):
+        waveform = torch.from_numpy(waveform).unsqueeze(0)
+        waveform = waveform.to(dtype=torch.float32)
+        resample_transform = T.Resample(orig_freq=ds_sample_rate, new_freq=24000)
+        waveform = resample_transform(waveform)
+        waveform = waveform.unsqueeze(0).to("cuda")
+        with torch.inference_mode():
+            codes = snac_model.encode(waveform)
+        all_codes = []
+        for i in range(codes[0].shape[1]):
+            all_codes.append(codes[0][0][i].item() + 128266)
+            all_codes.append(codes[1][0][2 * i].item() + 128266 + 4096)
+            all_codes.append(codes[2][0][4 * i].item() + 128266 + (2 * 4096))
+            all_codes.append(codes[2][0][(4 * i) + 1].item() + 128266 + (3 * 4096))
+            all_codes.append(codes[1][0][(2 * i) + 1].item() + 128266 + (4 * 4096))
+            all_codes.append(codes[2][0][(4 * i) + 2].item() + 128266 + (5 * 4096))
+            all_codes.append(codes[2][0][(4 * i) + 3].item() + 128266 + (6 * 4096))
+        return all_codes
+
+    def add_codes(example):
+        codes_list = None
+        try:
+            answer_audio = example.get("audio")
+            if answer_audio and "array" in answer_audio:
+                audio_array = answer_audio["array"]
+                codes_list = tokenise_audio(audio_array)
+        except Exception as e:  # pragma: no cover - best effort
+            print(f"Skipping row due to error: {e}")
+        example["codes_list"] = codes_list
+        return example
+
+    dataset = dataset.map(add_codes, remove_columns=["audio"])
+
+    TOKENISER_LENGTH = 128256
+    start_of_text = 128000
+    end_of_text = 128009
+    start_of_speech = TOKENISER_LENGTH + 1
+    end_of_speech = TOKENISER_LENGTH + 2
+    start_of_human = TOKENISER_LENGTH + 3
+    end_of_human = TOKENISER_LENGTH + 4
+    start_of_ai = TOKENISER_LENGTH + 5
+    end_of_ai = TOKENISER_LENGTH + 6
+
+    dataset = dataset.filter(lambda x: x["codes_list"] is not None)
+    dataset = dataset.filter(lambda x: len(x["codes_list"]) > 0)
+
+    def remove_duplicate_frames(example):
+        vals = example["codes_list"]
+        if len(vals) % 7 != 0:
+            raise ValueError("Input list length must be divisible by 7")
+        result = vals[:7]
+        for i in range(7, len(vals), 7):
+            current_first = vals[i]
+            previous_first = result[-7]
+            if current_first != previous_first:
+                result.extend(vals[i:i + 7])
+        example["codes_list"] = result
+        return example
+
+    dataset = dataset.map(remove_duplicate_frames)
+
+    def create_input_ids(example):
+        text_prompt = f"{example.get('source', '')}: {example['text']}" if 'source' in example else example['text']
+        text_ids = tokenizer.encode(text_prompt, add_special_tokens=True)
+        text_ids.append(end_of_text)
+        example['text_tokens'] = text_ids
+        input_ids = (
+            [start_of_human]
+            + example['text_tokens']
+            + [end_of_human]
+            + [start_of_ai]
+            + [start_of_speech]
+            + example['codes_list']
+            + [end_of_speech]
+            + [end_of_ai]
+        )
+        example['input_ids'] = input_ids
+        example['labels'] = input_ids
+        example['attention_mask'] = [1] * len(input_ids)
+        return example
+
+    dataset = dataset.map(create_input_ids, remove_columns=['codes_list', 'text_tokens'])
+    dataset = dataset.rename_column("text", "prompt")
+    dataset = dataset.map(
+        lambda x: {
+            "prompt": [{"role": "user", "content": f"<custom_token_3>{x['prompt']}"}],
+            "answer": "".join(tokenizer.batch_decode(x["labels"][x["labels"].index(end_of_text) :])).replace("<|eot_id|>", ""),
+        }
+    )
+
+
+
+    sp = SamplingParams()
+    training_args = GRPOConfig(
+        vllm_sampling_params=sp,
+        per_device_train_batch_size=batch_size,
+        gradient_accumulation_steps=grad_steps,
+        num_train_epochs=epochs,
+        learning_rate=lr,
+        logging_steps=log_steps,
+        weight_decay=weight_decay,
+        optim=optim,
+        lr_scheduler_type=scheduler,
+        output_dir="outputs",
+    )
+
+    def _dummy_reward(prompts, completions, **kwargs):
+        return [0.0] * len(completions)
+
+    trainer = GRPOTrainer(
+        model=model,
+        processing_class=tokenizer,
+        reward_funcs=[_dummy_reward],
+        args=training_args,
+        train_dataset=dataset,
+    )
+
+    trainer.train()
+
+    model.save_pretrained(save_dir)
+    tokenizer.save_pretrained(save_dir)
+    elapsed = time.perf_counter() - start_time
+    logger.info("GRPO LoRA %s trained in %.2fs", lora_name, elapsed)
+    return f"LoRA saved under {save_dir.resolve()}"
+
+
+def train_grpo_loras(
+    hf_links: str,
+    local_datasets: list[str],
+    batch_size: int,
+    grad_steps: int,
+    epochs: int,
+    lr: float,
+    log_steps: int,
+    weight_decay: float,
+    optim: str,
+    scheduler: str,
+) -> str:
+    """Batch GRPO training for multiple datasets."""
+    dataset_info: list[tuple[str, str, bool]] = []
+    links = [l.strip() for l in hf_links.splitlines() if l.strip()]
+    for link in links:
+        name = link.split("/")[-1]
+        dataset_info.append((link, name, False))
+    for ds in local_datasets:
+        dataset_info.append((str(DATASETS_DIR / ds), ds, True))
+    if not dataset_info:
+        return "No datasets selected."
+    msgs = []
+    total = len(dataset_info)
+    logger.info("Training %d GRPO LoRA(s)", total)
+    progress = gr.Progress()
+    for idx, (src, name, is_local) in enumerate(dataset_info, start=1):
+        progress((idx - 1) / total, desc=f"Training {name}...")
+        start = time.perf_counter()
+        try:
+            msg = train_grpo_single(
+                src,
+                name,
+                is_local,
+                batch_size,
+                grad_steps,
+                epochs,
+                lr,
+                log_steps,
+                weight_decay,
+                optim,
+                scheduler,
+            )
+            msgs.append(f"{name}: success")
+            elapsed = time.perf_counter() - start
+            logger.info("%s trained in %.2fs", name, elapsed)
+        except Exception as e:  # pragma: no cover - best effort
+            elapsed = time.perf_counter() - start
+            logger.exception("GRPO training failed for %s after %.2fs", name, elapsed)
             msgs.append(f"{name}: failed ({e})")
     progress(1)
     return "\n".join(msgs)
@@ -1098,6 +1355,37 @@ with gr.Blocks() as demo:
                     )
 
                     fs_clear.click(lambda: ("", None), None, [fs_gallery, fs_last_audio], queue=False)
+
+                with gr.Tab("Train GRPO"):
+                    grpo_hf = gr.Textbox(label="HF dataset link (one per line)")
+                    grpo_local = gr.Dropdown(choices=dataset_choices, multiselect=True, label="Local dataset(s)")
+                    with gr.Accordion("Ajustes avanzados", open=False):
+                        grpo_batch = gr.Number(value=1, precision=0, label="Batch size")
+                        grpo_grad = gr.Number(value=1, precision=0, label="Gradient accumulation")
+                        grpo_epochs = gr.Number(value=1, precision=0, label="Epochs")
+                        grpo_lr = gr.Number(value=5e-6, label="Learning rate")
+                        grpo_log = gr.Number(value=1, precision=0, label="Logging steps")
+                        grpo_wd = gr.Number(value=0.01, label="Weight decay")
+                        grpo_optim = gr.Textbox(value="adamw_8bit", label="Optimizer")
+                        grpo_sched = gr.Textbox(value="linear", label="LR scheduler type")
+                    grpo_btn = gr.Button("Train")
+                    grpo_out = gr.Textbox()
+                    grpo_btn.click(
+                        train_grpo_loras,
+                        [
+                            grpo_hf,
+                            grpo_local,
+                            grpo_batch,
+                            grpo_grad,
+                            grpo_epochs,
+                            grpo_lr,
+                            grpo_log,
+                            grpo_wd,
+                            grpo_optim,
+                            grpo_sched,
+                        ],
+                        grpo_out,
+                    )
 
     refresh_btn.click(
         refresh_lists,

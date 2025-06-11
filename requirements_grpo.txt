@@ -1,26 +1,7 @@
-# Core models and ML stack
-torch
-
-# Audio processing
-torchaudio
-
-# Transformers & related
-transformers
+# Extra dependencies for GRPO training
 unsloth
-peft
-snac
-
-# Data
-datasets
-pandas
-
-# Web UI
-gradio
-
-# Testing & tooling (optional)
-pytest
-# GRPO training dependencies
 vllm
+snac
 msgspec
 blake3
 fastapi
@@ -30,6 +11,7 @@ soundfile
 librosa
 evaluate
 jiwer
+# git repo for wespeaker
 wespeaker @ git+https://github.com/wenet-e2e/wespeaker.git
 cloudpickle
 openai
