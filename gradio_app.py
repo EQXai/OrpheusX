@@ -851,8 +851,8 @@ def generate_long_form(
     max_new_tokens: int,
     batch_size: int = 4,
     fade_ms: int = 60,
-) -> str:
-    """Generate long form audio by chunking and processing in parallel."""
+):
+    """Generate long form audio while reporting progress."""
     model_name = MODEL_NAME
     lora_path = None
     if lora_name:
@@ -864,35 +864,31 @@ def generate_long_form(
     # relatively short so batching remains efficient.
     segments = split_prompt_by_sentences(text, tokenizer, max_tokens=50)
     progress = gr.Progress()
-    loop = asyncio.new_event_loop()
-    try:
-        asyncio.set_event_loop(loop)
-        audio_parts = loop.run_until_complete(
-            _generate_long_form_async(
-                segments,
-                model,
-                snac_model,
-                batch_size,
-                max_new_tokens,
-                temperature,
-                top_p,
-                repetition_penalty,
-                progress,
-            )
-        )
-    finally:
-        asyncio.set_event_loop(None)
-        loop.close()
-    # Combine the generated audio chunks
-    progress(0.9, desc="Combining audio")
+    log_lines: list[str] = [f"Total segments: {len(segments)}"]
+    yield "\n".join(log_lines), None
+
     final_audio = None
-    for part in audio_parts:
-        if final_audio is None:
-            final_audio = part
-        else:
-            final_audio = concat_with_fade([final_audio, part], fade_ms=fade_ms)
+    for idx, seg in enumerate(segments, 1):
+        progress((idx - 1) / len(segments), desc=f"Chunk {idx}/{len(segments)}")
+        part = generate_audio_segment(
+            seg,
+            model,
+            snac_model,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+        )
+        final_audio = part if final_audio is None else concat_with_fade([final_audio, part], fade_ms=fade_ms)
+        torch.cuda.empty_cache()
+        gc.collect()
+        log_lines.append(f"Chunk {idx} done")
+        yield "\n".join(log_lines), None
+
     if final_audio is None:
-        return ""
+        yield "Generation failed", None
+        return
+    progress(0.9, desc="Saving audio")
     path = get_output_path(lora_name or "base_model")
     import torchaudio
     torchaudio.save(str(path), final_audio.detach().cpu(), 24000)
@@ -900,7 +896,8 @@ def generate_long_form(
     gc.collect()
     logger.info("Saved long form audio to %s", path)
     progress(1, desc="Done")
-    return str(path)
+    log_lines.append(f"Saved to {path}")
+    yield "\n".join(log_lines), str(path)
 
 
 def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tuple[str, str]:
@@ -1156,19 +1153,25 @@ with gr.Blocks() as demo:
                         lf_max_tok = gr.Number(value=4096, precision=0, label="Max New Tokens")
                         lf_fade = gr.Number(value=60, precision=0, label="Crossfade (ms)")
                     lf_btn = gr.Button("Generate")
+                    lf_log = gr.Textbox(label="Log")
                     lf_audio = gr.Audio(label="Output")
 
+                    def run_long_form(*vals):  # type: ignore
+                        prompt, lora, batch, temp, top_p_val, rep, max_tok, fade = vals
+                        lora = None if lora == "<base>" else lora
+                        yield from generate_long_form(
+                            prompt,
+                            lora,
+                            float(temp),
+                            float(top_p_val),
+                            float(rep),
+                            int(max_tok),
+                            int(batch),
+                            int(fade),
+                        )
+
                     lf_btn.click(
-                        lambda *args: generate_long_form(
-                            args[0],
-                            None if args[1] == "<base>" else args[1],
-                            args[3],
-                            args[4],
-                            args[5],
-                            int(args[6]),
-                            int(args[2]),
-                            int(args[7]),
-                        ),
+                        run_long_form,
                         [
                             lf_prompt,
                             lf_lora,
@@ -1179,7 +1182,7 @@ with gr.Blocks() as demo:
                             lf_max_tok,
                             lf_fade,
                         ],
-                        lf_audio,
+                        [lf_log, lf_audio],
                     )
 
 
