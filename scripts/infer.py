@@ -6,9 +6,15 @@ import torch
 import torchaudio
 import re
 import gc
+import time
 from unsloth import FastLanguageModel
 from snac import SNAC
 from peft import PeftModel
+from orpheusx.utils.segment_utils import (
+    split_prompt_by_tokens as _split_prompt_by_tokens,
+    split_prompt_by_sentences as _split_prompt_by_sentences,
+    print_segment_log as _print_segment_log,
+)
 
 # Root of repository to load helper modules when run from ``scripts`` directory
 import sys
@@ -40,37 +46,13 @@ def split_prompt_by_tokens(
     chunk_size: int = 50,
     return_text: bool = False,
 ) -> list[torch.Tensor] | tuple[list[str], list[torch.Tensor]]:
-    """Split text into token chunks without breaking words."""
-    words = text.split()
-    segments: list[str] = []
-    current_words: list[str] = []
-    token_len = 0
-    for word in words:
-        word_tokens = tokenizer(word, add_special_tokens=False).input_ids
-        if token_len + len(word_tokens) > chunk_size and current_words:
-            segments.append(" ".join(current_words))
-            current_words = [word]
-            token_len = len(word_tokens)
-        else:
-            current_words.append(word)
-            token_len += len(word_tokens)
-    if current_words:
-        segments.append(" ".join(current_words))
-    token_segments = [
-        tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments
-    ]
-    return (segments, token_segments) if return_text else token_segments
+    """Split text into token chunks without breaking words (shared wrapper)."""
+    return _split_prompt_by_tokens(text, tokenizer, chunk_size, return_text)
 
 
 def print_segment_log(prompt: str, segments: list[str]) -> None:
-    """Print segment boundaries for a prompt."""
-    print("Segmentation log:")
-    offset = 0
-    for idx, seg in enumerate(segments, 1):
-        start = prompt.find(seg, offset)
-        end = start + len(seg)
-        print(f"{idx}: chars {start}-{end}: {seg}")
-        offset = end
+    """Print segment boundaries for a prompt (shared wrapper)."""
+    _print_segment_log(prompt, segments)
 
 
 def split_prompt_by_sentences(
@@ -79,32 +61,8 @@ def split_prompt_by_sentences(
     chunk_size: int = 50,
     return_text: bool = False,
 ) -> list[torch.Tensor] | tuple[list[str], list[torch.Tensor]]:
-    """Split text into sentence groups not exceeding ``chunk_size`` tokens."""
-    raw_parts = [s.strip() for s in re.split(r"(?<=[.!?,])\s+", text.strip()) if s.strip()]
-    sentences: list[str] = []
-    for part in raw_parts:
-        if sentences:
-            prev = sentences[-1]
-            if prev.endswith(",") and (part.endswith(",") or len(part.split()) < 3):
-                sentences[-1] = prev + " " + part
-                continue
-        sentences.append(part)
-    segments: list[str] = []
-    current: list[str] = []
-    for sent in sentences:
-        candidate = " ".join(current + [sent])
-        token_len = len(tokenizer(candidate, add_special_tokens=False).input_ids)
-        if token_len > chunk_size and current:
-            segments.append(" ".join(current))
-            current = [sent]
-        else:
-            current.append(sent)
-    if current:
-        segments.append(" ".join(current))
-    token_segments = [
-        tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in segments
-    ]
-    return (segments, token_segments) if return_text else token_segments
+    """Split text into sentence groups not exceeding *chunk_size* tokens (shared wrapper)."""
+    return _split_prompt_by_sentences(text, tokenizer, chunk_size, return_text)
 
 
 def generate_audio_segment(
@@ -190,6 +148,12 @@ def main():
         default=1200,
         help='Maximum number of tokens to generate',
     )
+    parser.add_argument(
+        '--fade_ms',
+        type=int,
+        default=60,
+        help='Crossfade duration in milliseconds',
+    )
     args = parser.parse_args()
     model, tokenizer = load_model(args.model, args.lora)
 
@@ -258,14 +222,27 @@ def main():
             print_segment_log(text, seg_text)
         else:
             segments = [tokenizer(text, return_tensors='pt').input_ids.squeeze(0)]
-        audio_parts = []
+        start_time = time.perf_counter()
+        final_audio = None
         for ids in segments:
-            audio_parts.append(
-                generate_audio_segment(ids, model, snac_model, max_new_tokens=args.max_tokens)
+            part = generate_audio_segment(
+                ids, model, snac_model, max_new_tokens=args.max_tokens
             )
+            if final_audio is None:
+                final_audio = part
+            else:
+                final_audio = concat_with_fade([final_audio, part], fade_ms=args.fade_ms)
             torch.cuda.empty_cache()
             gc.collect()
-        final_audio = concat_with_fade(audio_parts)
+        if final_audio is None:
+            continue
+        elapsed = time.perf_counter() - start_time
+        duration = final_audio.shape[-1] / 24000
+        if duration:
+            rate = elapsed / duration
+        else:
+            rate = 0.0
+        print(f"Inference time: {elapsed:.2f}s ({rate:.2f}s per generated second)")
         path = 'output.wav'
         torchaudio.save(path, final_audio.detach().cpu(), 24000)
         print(f'Audio written to {path}')

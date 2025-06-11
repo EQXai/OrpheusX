@@ -1,0 +1,21 @@
+# Core models and ML stack
+torch
+
+# Audio processing
+torchaudio
+
+# Transformers & related
+transformers
+unsloth
+peft
+snac
+
+# Data
+datasets
+pandas
+
+# Web UI
+gradio
+
+# Testing & tooling (optional)
+pytest 

@@ -21,12 +21,18 @@ from tools.Whisper import run as whisper_run
 from tools.Whisper.upload import load_dataset_from_folder
 
 
-def prepare_dataset(audio_path: str, output_dir: str) -> None:
+def prepare_dataset(
+    audio_path: str,
+    output_dir: str,
+    min_tokens: int | None = None,
+    max_tokens: int | None = None,
+) -> None:
     """Transcribe ``audio_path`` and save the dataset under ``output_dir``.
 
     Audio is segmented into fragments around 20 seconds long (typically
     between 15 and 25 seconds) without cutting words so that each clip matches
-    its transcript exactly.
+    its transcript exactly. ``min_tokens`` and ``max_tokens`` can be used to
+    control the token length of each segment.
     """
     audio_path = Path(audio_path).resolve()
     base = audio_path.stem
@@ -36,8 +42,16 @@ def prepare_dataset(audio_path: str, output_dir: str) -> None:
     # Run WhisperX transcription and segmentation
     json_path = whisper_run.run_whisperx(audio_path, temp_out)
 
-    # Always split into 15–25 second fragments without cutting words
-    whisper_run.segment_audio(audio_path, json_path, segment_out)
+    # Always split into 15–25 second fragments without cutting words.
+    # When token limits are provided, they are forwarded to the segmentation
+    # helper to optionally enforce a token range.
+    whisper_run.segment_audio(
+        audio_path,
+        json_path,
+        segment_out,
+        max_tokens=max_tokens,
+        min_tokens=min_tokens or 0,
+    )
 
     # Build Dataset and store it on disk
     dataset = load_dataset_from_folder(segment_out)
@@ -74,9 +88,11 @@ def main():
     parser = argparse.ArgumentParser(description="Transcribe audio and save as dataset")
     parser.add_argument("audio", help="Path to audio file (.mp3 or .wav)")
     parser.add_argument("output", help="Directory to save the dataset")
+    parser.add_argument("--min-tokens", type=int, default=0, help="Minimum tokens per segment")
+    parser.add_argument("--max-tokens", type=int, default=None, help="Maximum tokens per segment")
     args = parser.parse_args()
 
-    prepare_dataset(args.audio, args.output)
+    prepare_dataset(args.audio, args.output, args.min_tokens, args.max_tokens)
 
 
 if __name__ == "__main__":

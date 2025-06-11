@@ -67,10 +67,12 @@ python scripts/orpheus_cli.py
 - Prompt lists in `prompt_list/` can be loaded for batch generation
 - Use `<laugh>`, `<chuckle>`, `<sigh>`, `<cough>`, `<sniffle>`, `<groan>`, `<yawn>`, `<gasp>` for preset expressions
 - When prompts are segmented, pieces are joined with a short crossfade for smooth audio
+- The crossfade defaults to **60 ms** and can be adjusted via the `--fade_ms` argument or the UI slider
 - Verify your environment with `python scripts/check_env.py` (checks packages, CUDA and ffmpeg)
 - The dataset helper lists audio files from `source_audio/` so you can pick them interactively
 - Segmentation mode prints the start and end index of each chunk so you know where text was split
-- Trained LoRA adapters are stored under `scripts/lora_models/<dataset>/lora_model`
+- Trained LoRA adapters are stored under `lora_models/<dataset>/lora_model`
+- Detailed logs for the CLI and Gradio interface are saved under `logs/orpheus.log`
 
 All features are available via an interactive command-line menu.
 
@@ -92,18 +94,35 @@ The "Max New Tokens" setting defaults to 1200. The model has a 2048 token
 context limit, so the sum of prompt tokens and new tokens should not exceed
 this value.
 
+The interface offers two presets under "Advanced Settings": **Short Audio**
+and **Long Audio**. The short preset keeps segmentation disabled and limits
+new tokens to 1200, while the long preset enables sentence segmentation and
+allows up to 2400 new tokens.
+
 ### Prompt Segmentation
 
 Long prompts can be split automatically during inference to avoid hitting the
-token limit. Use `--segment` along with `--segment-by tokens` (default) or
-`--segment-by sentence` to control how text is chunked. Sentence segmentation
-usually produces smoother audio because pauses occur at natural boundaries.
-When splitting by sentences, commas are also considered separators. The
+token limit. Use `--segment` along with `--segment-by tokens` (default),
+`--segment-by sentence`, or `--segment-by full_segment` to control how text is
+chunked. Sentence segmentation usually produces smoother audio because pauses
+occur at natural boundaries. The `full_segment` mode splits on every comma,
+period, question mark or exclamation point, producing the smallest possible
+chunks and ignoring the token count settings. When splitting by sentences,
+commas are also considered separators. The
 algorithm ignores consecutive commas and merges pieces shorter than three words
 with their neighbors so lists or short phrases aren't broken awkwardly. Enable
 sentence segmentation for long prompts with natural pause points.
 
+The Gradio interface lets you choose which punctuation characters trigger
+segmentation (comma, period, question mark and exclamation point) and specify a
+minimum and maximum token count for each segment. The limits are ignored when
+`full_segment` is selected.
+
+There is also a **Full Segment Test** tab in the web UI. This simplified
+interface exposes only character-based segmentation so you can verify how the
+`full_segment` mode splits prompts without any token settings.
+
 While generating audio, the CLI prints a segmentation log showing where each
 chunk starts and ends. After all segments are generated they are automatically
-crossfaded to hide the cuts.
+crossfaded to hide the cuts. The default fade length is 60 ms.
 
