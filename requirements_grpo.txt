@@ -1,0 +1,23 @@
+# Extra dependencies for GRPO training
+unsloth
+vllm
+snac
+msgspec
+blake3
+fastapi
+gguf
+wandb
+soundfile
+librosa
+evaluate
+jiwer
+# git repo for wespeaker
+wespeaker @ git+https://github.com/wenet-e2e/wespeaker.git
+cloudpickle
+openai
+py-cpuinfo
+llguidance
+xgrammar
+numpy==1.24
+torchmetrics[audio]
+audiobox_aesthetics
