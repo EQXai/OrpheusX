@@ -490,5 +490,5 @@ if __name__ == "__main__":
 
     # Create and launch the UI
     demo = create_ui()
-    demo.launch(share=False)  # Set share=False to disable public URL sharing
+    demo.launch(server_port=18188, share=False)
 
