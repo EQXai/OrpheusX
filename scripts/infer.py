@@ -191,7 +191,8 @@ def generate_long_form(
     fade_ms: int,
 ) -> torch.Tensor | None:
     """Generate long form audio by chunking and processing in parallel."""
-    segments = split_prompt_by_sentences(text, tokenizer, max_tokens=300)
+    # Use smaller chunks to keep each segment manageable during generation
+    segments = split_prompt_by_sentences(text, tokenizer, max_tokens=50)
     loop = asyncio.new_event_loop()
     try:
         asyncio.set_event_loop(loop)

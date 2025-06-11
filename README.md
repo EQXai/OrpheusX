@@ -83,7 +83,7 @@ python scripts/orpheus_cli.py
 - Segmentation mode prints the start and end index of each chunk so you know where text was split
 - Trained LoRA adapters are stored under `lora_models/<dataset>/lora_model`
 - Detailed logs for the CLI and Gradio interface are saved under `logs/orpheus.log`
-- The **Long Form** tab chunks large prompts, processes them in parallel and assembles a single audio file. Batch size controls how many chunks run concurrently.
+- The **Long Form** tab chunks large prompts, processes them in parallel and assembles a single audio file. Each sentence group is limited to about 50 tokens so batching stays efficient. Batch size controls how many chunks run concurrently.
 - vLLM settings are applied automatically to allow context lengths up to 100k tokens while disabling telemetry.
 
 All features are available via an interactive command-line menu.

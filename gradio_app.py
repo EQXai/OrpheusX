@@ -860,7 +860,9 @@ def generate_long_form(
     model, tokenizer = load_model(model_name, str(lora_path) if lora_path else None)
     snac_model = get_snac_model()
 
-    segments = split_prompt_by_sentences(text, tokenizer, max_tokens=300)
+    # Split text into manageable sentence groups. 50 tokens keeps each chunk
+    # relatively short so batching remains efficient.
+    segments = split_prompt_by_sentences(text, tokenizer, max_tokens=50)
     progress = gr.Progress()
     loop = asyncio.new_event_loop()
     try:
@@ -881,6 +883,8 @@ def generate_long_form(
     finally:
         asyncio.set_event_loop(None)
         loop.close()
+    # Combine the generated audio chunks
+    progress(0.9, desc="Combining audio")
     final_audio = None
     for part in audio_parts:
         if final_audio is None:
@@ -895,6 +899,7 @@ def generate_long_form(
     torch.cuda.empty_cache()
     gc.collect()
     logger.info("Saved long form audio to %s", path)
+    progress(1, desc="Done")
     return str(path)
 
 
