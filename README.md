@@ -42,7 +42,7 @@ To start:
 If you prefer a simple web UI instead of the CLI, run:
 
 ```bash
-python gradio_app.py
+python orpheus_wrapper.py
 ```
 
 
