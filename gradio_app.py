@@ -32,6 +32,28 @@ PROMPT_LIST_DIR = REPO_ROOT / "prompt_list"
 SOURCE_AUDIO_DIR = REPO_ROOT / "source_audio"
 MAX_PROMPTS = 5
 
+# Flag used to cancel the current running task
+CANCEL_TASK = False
+
+
+def cancel_task() -> None:
+    """Signal the current operation to stop."""
+    global CANCEL_TASK
+    CANCEL_TASK = True
+
+
+def check_cancel() -> None:
+    """Raise a gr.Error if a cancel request was issued."""
+    global CANCEL_TASK
+    if CANCEL_TASK:
+        CANCEL_TASK = False
+        raise gr.Error("Operation cancelled")
+
+
+def exit_gradio() -> None:
+    """Terminate the Gradio server process."""
+    os._exit(0)
+
 logger = get_logger("gradio_app")
 
 
@@ -99,6 +121,7 @@ def prepare_datasets_ui(
     total = len(tasks)
     progress = gr.Progress()
     for idx, (audio_path, ds_name) in enumerate(tasks, start=1):
+        check_cancel()
         start = time.perf_counter()
         progress((idx - 1) / total, desc=f"Preparing {ds_name}...")
         out_dir = DATASETS_DIR / ds_name
@@ -118,6 +141,7 @@ def prepare_datasets_ui(
             logger.exception("Error preparing %s after %.2fs", ds_name, elapsed)
             msgs.append(f"{ds_name}: failed ({e})")
         progress(idx / total)
+        check_cancel()
     return "\n".join(msgs)
 
 
@@ -341,6 +365,7 @@ def train_loras(
     logger.info("Training %d LoRA(s)", total)
     progress = gr.Progress()
     for idx, (src, name, is_local) in enumerate(dataset_info, start=1):
+        check_cancel()
         progress((idx - 1) / total, desc=f"Training {name}...")
         start = time.perf_counter()
         try:
@@ -366,6 +391,7 @@ def train_loras(
             elapsed = time.perf_counter() - start
             logger.exception("Training failed for %s after %.2fs", name, elapsed)
             msgs.append(f"{name}: failed ({e})")
+        check_cancel()
     progress(1)
     return "\n".join(msgs)
 
@@ -739,7 +765,9 @@ def generate_batch(
     step = 0
     progress = gr.Progress()
     for lora in loras:
+        check_cancel()
         for text in prompts:
+            check_cancel()
             progress(step / total, desc=f"Generating {lora or 'base'}...")
             logger.info("Generating prompt '%s' with lora '%s'", text, lora or 'base_model')
             path = generate_audio(
@@ -763,6 +791,7 @@ def generate_batch(
             results.append((path, caption))
             last_path = path
             step += 1
+            check_cancel()
     progress(1)
     html_items = []
     for path, caption in results:
@@ -788,6 +817,7 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tupl
         return "No dataset selected", ""
     if not prompt:
         return "Prompt is empty", ""
+    check_cancel()
     ds_name = Path(dataset_file).stem
     audio_path = SOURCE_AUDIO_DIR / dataset_file
     dataset_dir = DATASETS_DIR / ds_name
@@ -800,16 +830,19 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tupl
         msgs.append("Dataset prepared")
     else:
         msgs.append("Dataset already prepared")
+    check_cancel()
     if not lora_dir.is_dir():
         progress(0.33, desc="Training LoRA")
         train_lora_single(str(dataset_dir), ds_name, True)
         msgs.append("LoRA trained")
     else:
         msgs.append("LoRA already trained")
+    check_cancel()
     tokenizer = get_pipeline_tokenizer()
     token_len = len(tokenizer(prompt, add_special_tokens=False).input_ids)
     use_segmentation = token_len > 50
     progress(0.66, desc="Generating audio")
+    check_cancel()
     if use_segmentation:
         out_path = generate_audio(
             prompt,
@@ -826,6 +859,7 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tupl
     else:
         out_path = generate_audio(prompt, ds_name, fade_ms=fade_ms)
     progress(1, desc="Done")
+    check_cancel()
     msgs.append(f"Audio saved to {out_path}")
     return "\n".join(msgs), out_path
 
@@ -845,13 +879,15 @@ def refresh_lists() -> tuple:
         gr.update(choices=list_prompt_files()),
         gr.update(choices=list_source_audio()),
         gr.update(choices=list_source_audio()),
-        gr.update(choices=list_source_audio()),
     )
 
 with gr.Blocks() as demo:
     gr.Markdown("# OrpheusX Gradio Interface")
 
-    refresh_btn = gr.Button("Refresh directories")
+    with gr.Row():
+        refresh_btn = gr.Button("Refresh directories")
+        stop_btn = gr.Button("Stop Task")
+        exit_btn = gr.Button("Exit")
 
     with gr.Tabs():
         with gr.Tab("Unified"):
@@ -1050,91 +1086,12 @@ with gr.Blocks() as demo:
 
                     clear_btn.click(lambda: ("", None), None, [gallery, last_audio], queue=False)
 
-
-
-        with gr.Tab("TESTING"):
-            with gr.Tabs():
-                with gr.Tab("Prepare Dataset (Tokens)"):
-                    audio_input_tok = gr.Audio(type="filepath", label="Upload audio")
-                    local_audio_tok = gr.Dropdown(choices=list_source_audio(), multiselect=True, label="Existing audio file(s)")
-                    dataset_name_tok = gr.Textbox(label="Dataset Name (for upload)")
-                    min_tokens_inp = gr.Number(value=0, precision=0, label="Min tokens per segment")
-                    max_tokens_inp = gr.Number(value=50, precision=0, label="Max tokens per segment")
-                    prepare_btn_tok = gr.Button("Prepare")
-                    prepare_output_tok = gr.Textbox()
-                    prepare_btn_tok.click(
-                        prepare_datasets_ui,
-                        [
-                            audio_input_tok,
-                            dataset_name_tok,
-                            local_audio_tok,
-                            min_tokens_inp,
-                            max_tokens_inp,
-                        ],
-                        prepare_output_tok,
-                    )
-
-                with gr.Tab("Full Segment Test"):
-                    fs_prompt = gr.Textbox(label="Prompt")
-                    fs_lora = gr.Dropdown(choices=["<base>"] + lora_choices, multiselect=True, label="LoRA(s)")
-                    fs_chars = gr.CheckboxGroup([",", ".", "?", "!"], value=[",", ".", "?", "!"], label="Segment characters")
-                    with gr.Accordion("Advanced Settings", open=False):
-                        fs_temperature = gr.Slider(0.1, 1.5, value=0.6, label="Temperature")
-                        fs_top_p = gr.Slider(0.5, 1.0, value=0.95, label="Top P")
-                        fs_rep_penalty = gr.Slider(1.0, 2.0, value=1.1, label="Repetition Penalty")
-                        fs_max_tokens = gr.Number(value=1200, precision=0, label="Max New Tokens")
-                        fs_gap = gr.Number(value=0.0, precision=1, label="Gap between segments (s)")
-                        fs_fade_ms = gr.Number(value=60, precision=0, label="Crossfade (ms)")
-                    fs_btn = gr.Button("Generate")
-                    fs_clear = gr.Button("Clear Gallery")
-                    fs_gallery = gr.HTML(label="Outputs")
-                    fs_last_audio = gr.Audio(label="Last Audio")
-
-                    def run_full_seg(prompt, loras, temp, top_p_val, rep, max_tok, seg_chars, gap, fade):
-                        return generate_batch(
-                            [prompt] if prompt else [],
-                            loras or [None],
-                            temp,
-                            top_p_val,
-                            rep,
-                            max_tok,
-                            True,
-                            "full_segment",
-                            seg_chars or [],
-                            0,
-                            50,
-                            gap,
-                            fade,
-                        )
-
-                    fs_btn.click(
-                        run_full_seg,
-                        [
-                            fs_prompt,
-                            fs_lora,
-                            fs_temperature,
-                            fs_top_p,
-                            fs_rep_penalty,
-                            fs_max_tokens,
-                            fs_chars,
-                            fs_gap,
-                            fs_fade_ms,
-                        ],
-                        [fs_gallery, fs_last_audio],
-                    )
-
-                    fs_clear.click(lambda: ("", None), None, [fs_gallery, fs_last_audio], queue=False)
-
     refresh_btn.click(
         refresh_lists,
         None,
-        [local_ds, lora_used, prompt_list_dd, local_audio, local_audio_tok, auto_dataset],
+        [local_ds, lora_used, prompt_list_dd, local_audio, auto_dataset],
     )
+    stop_btn.click(cancel_task, None, None, queue=False)
+    exit_btn.click(exit_gradio, None, None, queue=False)
 if __name__ == "__main__":
-    port_input = input("Which port should Gradio use? (default 7860): ")
-    try:
-        port = int(port_input) if port_input.strip() else 7860
-    except ValueError:
-        print("Invalid value, using port 7860")
-        port = 7860
-    demo.launch(server_port=port)
+    demo.launch(server_port=18188)
