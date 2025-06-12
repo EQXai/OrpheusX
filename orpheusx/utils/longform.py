@@ -42,7 +42,6 @@ def chunk_text(text: str, max_chunk_size: int = 300) -> List[str]:
         chunks.append(current)
     return chunks
 
-
 def _generate_segment(
     tokens: torch.Tensor,
     model,
@@ -163,6 +162,7 @@ async def generate_long_form_speech_async(
         seg_text = chunk_text(text, max_chunk_size=chunk_size)
         print_segment_log(text, seg_text)
         segments = [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in seg_text]
+
     else:
         segments = [tokenizer(text, return_tensors="pt").input_ids.squeeze(0)]
 

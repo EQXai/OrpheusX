@@ -717,6 +717,7 @@ def generate_audio(
                     tokenizer,
                     snac_model,
                     segment=True,
+
                     chunk_size=seg_max_tokens,
                     batch_size=batch_size if parallel else 1,
                     max_new_tokens=max_new_tokens,
