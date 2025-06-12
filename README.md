@@ -45,6 +45,18 @@ If you prefer a simple web UI instead of the CLI, run:
 python orpheus_wrapper.py
 ```
 
+### OrpheusTTS WebUI
+
+To try the standalone Orpheus text-to-speech demo using the pretrained model,
+run the setup script under `orpheus_tts_webui/` and follow the prompts:
+
+```bash
+cd orpheus_tts_webui
+bash setup_orpheus.sh
+```
+
+After setup you can launch the interface with `./launch_orpheus.sh`.
+
 
 # 📁 Where to place the audio dataset:
 

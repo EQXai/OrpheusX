@@ -20,6 +20,8 @@ import gc
 import time
 import asyncio
 from tools.logger_utils import get_logger
+from orpheus_tts import OrpheusModel
+from vllm.engine.async_llm_engine import AsyncLLMEngine, AsyncEngineArgs
 
 # Helper for audio concatenation with crossfade
 from audio_utils import concat_with_fade
@@ -37,6 +39,34 @@ MAX_PROMPTS = 5
 
 logger = get_logger("gradio_app")
 STOP_FLAG = False
+
+# Environment defaults for vLLM-based Orpheus TTS
+os.environ.setdefault("VLLM_MAX_MODEL_LEN", "100000")
+os.environ.setdefault("VLLM_GPU_MEMORY_UTILIZATION", "0.9")
+os.environ.setdefault("VLLM_DISABLE_LOGGING", "1")
+os.environ.setdefault("VLLM_NO_USAGE_STATS", "1")
+os.environ.setdefault("VLLM_DO_NOT_TRACK", "1")
+os.environ.setdefault("GRADIO_ANALYTICS_ENABLED", "0")
+
+_orig_from_engine_args = AsyncLLMEngine.from_engine_args.__func__  # type: ignore
+
+def _patched_from_engine_args(cls, engine_args: AsyncEngineArgs, *args, **kwargs):
+    try:
+        engine_args.max_model_len = int(os.getenv("VLLM_MAX_MODEL_LEN", "100000"))
+    except ValueError:
+        pass
+    try:
+        engine_args.gpu_memory_utilization = float(os.getenv("VLLM_GPU_MEMORY_UTILIZATION", "0.9"))
+    except ValueError:
+        pass
+    return _orig_from_engine_args(cls, engine_args, *args, **kwargs)
+
+AsyncLLMEngine.from_engine_args = classmethod(_patched_from_engine_args)
+
+TTS_MODEL = None
+TTS_SAMPLE_RATE = 24000
+TTS_MODEL_PATH = None
+TTS_MODEL_NAME = TTS_MODEL_PATH if TTS_MODEL_PATH else "canopylabs/orpheus-tts-0.1-finetune-prod"
 
 
 def stop_current() -> str:
@@ -892,6 +922,248 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tupl
     return "\n".join(msgs), out_path
 
 
+# ---- Orpheus TTS Inference ----
+
+def tts_load_model(model_name: str = TTS_MODEL_NAME) -> bool:
+    """Load the Orpheus TTS model once."""
+    global TTS_MODEL
+    if TTS_MODEL is not None:
+        return True
+    try:
+        logger.info("Loading Orpheus model %s", model_name)
+        TTS_MODEL = OrpheusModel(model_name=model_name)
+        return True
+    except Exception as e:  # pragma: no cover - best effort
+        logger.exception("Failed to load Orpheus model: %s", e)
+        return False
+
+
+def tts_generate_speech(
+    prompt: str,
+    voice: str,
+    temperature: float,
+    top_p: float,
+    repetition_penalty: float,
+    max_tokens: int,
+) -> tuple[str, str]:
+    """Generate speech from a single prompt."""
+    if TTS_MODEL is None:
+        if not tts_load_model():
+            return "", "Model failed to load"
+    start_time = time.monotonic()
+    tokens = TTS_MODEL.generate_speech(
+        prompt=prompt,
+        voice=voice,
+        temperature=temperature,
+        top_p=top_p,
+        repetition_penalty=repetition_penalty,
+        max_tokens=max_tokens,
+    )
+    out_file = f"output_{int(time.time())}.wav"
+    with wave.open(out_file, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(TTS_SAMPLE_RATE)
+        total_frames = 0
+        for chunk in tokens:
+            frame_count = len(chunk) // (wf.getsampwidth() * wf.getnchannels())
+            total_frames += frame_count
+            wf.writeframes(chunk)
+        duration = total_frames / wf.getframerate()
+    elapsed = time.monotonic() - start_time
+    msg = f"Generated {duration:.2f} seconds of audio in {elapsed:.2f} seconds"
+    logger.info(msg)
+    return out_file, msg
+
+
+def tts_chunk_text(text: str, max_chunk_size: int = 300) -> list[str]:
+    """Split long text on sentence boundaries."""
+    text = re.sub(r"\s+", " ", text)
+    segments = re.split(r"(?<=[.!?])\s+", text)
+    sentences = []
+    for seg in segments:
+        seg = seg.strip()
+        if not seg:
+            continue
+        if seg[-1] not in ".!?":
+            seg += "."
+        sentences.append(seg)
+    chunks: list[str] = []
+    current = ""
+    for s in sentences:
+        if len(current) + len(s) > max_chunk_size and current:
+            chunks.append(current)
+            current = s
+        else:
+            current += " " + s if current else s
+    if current:
+        chunks.append(current)
+    logger.info("Text chunked into %d segments", len(chunks))
+    return chunks
+
+
+async def _tts_process_chunk(
+    chunk: str,
+    voice: str,
+    temperature: float,
+    top_p: float,
+    repetition_penalty: float,
+    max_tokens: int,
+    temp_dir: str,
+    idx: int,
+) -> tuple[str, float]:
+    """Generate one chunk asynchronously."""
+    loop = asyncio.get_event_loop()
+
+    def _run():
+        return TTS_MODEL.generate_speech(
+            prompt=chunk,
+            voice=voice,
+            temperature=temperature,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+            max_tokens=max_tokens,
+        )
+
+    syn_tokens = await loop.run_in_executor(None, _run)
+    file_path = os.path.join(temp_dir, f"chunk_{idx}.wav")
+    with wave.open(file_path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(TTS_SAMPLE_RATE)
+        frames = 0
+        for audio_chunk in syn_tokens:
+            frame_count = len(audio_chunk) // (wf.getsampwidth() * wf.getnchannels())
+            frames += frame_count
+            wf.writeframes(audio_chunk)
+        dur = frames / wf.getframerate()
+    return file_path, dur
+
+
+async def tts_generate_long_form_async(
+    long_text: str,
+    voice: str,
+    temperature: float,
+    top_p: float,
+    repetition_penalty: float,
+    batch_size: int,
+    max_tokens: int,
+    progress=None,
+) -> tuple[str, str]:
+    start_time = time.monotonic()
+    if progress:
+        progress(0, desc="Preparing text chunks")
+    chunks = tts_chunk_text(long_text)
+    if progress:
+        progress(0.1, desc=f"Text split into {len(chunks)} chunks")
+    temp_dir = f"longform_{int(time.time())}"
+    os.makedirs(temp_dir, exist_ok=True)
+    sem = asyncio.Semaphore(batch_size)
+    results = []
+
+    async def _worker(chunk: str, idx: int):
+        async with sem:
+            res = await _tts_process_chunk(
+                chunk,
+                voice,
+                temperature,
+                top_p,
+                repetition_penalty,
+                max_tokens,
+                temp_dir,
+                idx,
+            )
+            if progress:
+                progress((idx + 1) / len(chunks), desc=f"Processed {idx + 1}/{len(chunks)}")
+            return res
+
+    tasks = [_worker(c, i) for i, c in enumerate(chunks)]
+    out = await asyncio.gather(*tasks)
+    files = []
+    duration = 0.0
+    for f, d in out:
+        files.append(f)
+        duration += d
+    combined = f"longform_output_{int(time.time())}.wav"
+    data = []
+    for f in sorted(files, key=lambda p: int(Path(p).stem.split('_')[1])):
+        with wave.open(f, "rb") as w:
+            data.append([w.getparams(), w.readframes(w.getnframes())])
+    with wave.open(combined, "wb") as out_w:
+        if data:
+            out_w.setparams(data[0][0])
+            for d in data:
+                out_w.writeframes(d[1])
+    for f in files:
+        try:
+            os.remove(f)
+        except Exception:
+            pass
+    try:
+        os.rmdir(temp_dir)
+    except Exception:
+        pass
+    elapsed = time.monotonic() - start_time
+    msg = f"Generated {duration:.2f} seconds of audio from {len(chunks)} chunks in {elapsed:.2f} seconds"
+    if progress:
+        progress(1, desc="Complete")
+    logger.info(msg)
+    return combined, msg
+
+
+def tts_generate_long_form(
+    long_text: str,
+    voice: str,
+    temperature: float,
+    top_p: float,
+    repetition_penalty: float,
+    batch_size: int = 4,
+    max_tokens: int = 4096,
+    progress=gr.Progress(),
+) -> tuple[str, str]:
+    if TTS_MODEL is None:
+        if not tts_load_model():
+            return "", "Model failed to load"
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(
+            tts_generate_long_form_async(
+                long_text,
+                voice,
+                temperature,
+                top_p,
+                repetition_penalty,
+                batch_size,
+                max_tokens,
+                progress,
+            )
+        )
+    finally:
+        loop.close()
+
+
+def tts_cleanup_files() -> None:
+    removed = 0
+    for f in os.listdir():
+        if (f.startswith("output_") or f.startswith("longform_output_")) and f.endswith(".wav"):
+            try:
+                os.remove(f)
+                removed += 1
+            except Exception:
+                pass
+    for d in os.listdir():
+        if d.startswith("longform_") and os.path.isdir(d):
+            try:
+                for f in os.listdir(d):
+                    os.remove(os.path.join(d, f))
+                os.rmdir(d)
+                removed += 1
+            except Exception:
+                pass
+    logger.info("Cleanup removed %d files/directories", removed)
+
+
 # ---- Gradio Interface ----
 dataset_choices = list_datasets()
 lora_choices = list_loras()
@@ -924,6 +1196,47 @@ with gr.Blocks() as demo:
                     auto_dataset.change(dataset_status, auto_dataset, auto_status)
                     auto_btn.click(run_full_pipeline, [auto_dataset, auto_prompt], [auto_log, auto_audio])
 
+        with gr.Tab("OrpheusTTS"):
+            with gr.Tabs():
+                with gr.Tab("Single Text"):
+                    tts_prompt = gr.Textbox(label="Text Input", lines=3, placeholder="Enter text...")
+                    with gr.Row():
+                        tts_voice = gr.Dropdown(choices=["tara", "jess", "leo", "leah", "dan", "mia", "zac", "zoe"], value="tara", label="Voice")
+                    with gr.Row():
+                        tts_max_tokens = gr.Slider(label="Max Tokens", value=2048, minimum=128, maximum=16384, step=128)
+                        tts_temperature = gr.Slider(minimum=0.1, maximum=2.0, value=1.0, step=0.1, label="Temperature")
+                        tts_top_p = gr.Slider(minimum=0.1, maximum=1.0, value=0.9, step=0.05, label="Top P")
+                        tts_rep_penalty = gr.Slider(minimum=1.1, maximum=2.0, value=1.2, step=0.1, label="Repetition Penalty")
+                    tts_submit = gr.Button("Generate Speech", variant="primary")
+                    tts_audio = gr.Audio(label="Generated Speech")
+                    tts_stats = gr.Textbox(label="Generation Stats", interactive=False)
+
+                    tts_submit.click(
+                        tts_generate_speech,
+                        [tts_prompt, tts_voice, tts_temperature, tts_top_p, tts_rep_penalty, tts_max_tokens],
+                        [tts_audio, tts_stats],
+                    )
+
+                with gr.Tab("Long Form"):
+                    lf_prompt = gr.Textbox(label="Long Form Text Input", lines=15, placeholder="Enter long text...")
+                    with gr.Row():
+                        lf_voice = gr.Dropdown(choices=["tara", "jess", "leo", "leah", "dan", "mia", "zac", "zoe"], value="tara", label="Voice")
+                    with gr.Row():
+                        lf_max_tokens = gr.Slider(label="Max Tokens", value=4096, minimum=128, maximum=16384, step=128)
+                        lf_temperature = gr.Slider(minimum=0.1, maximum=2.0, value=0.6, step=0.1, label="Temperature")
+                        lf_top_p = gr.Slider(minimum=0.1, maximum=1.0, value=0.8, step=0.05, label="Top P")
+                        lf_rep_penalty = gr.Slider(minimum=1.0, maximum=2.0, value=1.1, step=0.1, label="Repetition Penalty")
+                        lf_batch = gr.Slider(minimum=1, maximum=10, value=4, step=1, label="Batch Size")
+                    lf_submit = gr.Button("Generate Long Form Speech", variant="primary")
+                    lf_audio = gr.Audio(label="Generated Long Form Speech")
+                    lf_stats = gr.Textbox(label="Generation Stats", interactive=False)
+
+                    lf_submit.click(
+                        tts_generate_long_form,
+                        [lf_prompt, lf_voice, lf_temperature, lf_top_p, lf_rep_penalty, lf_batch, lf_max_tokens],
+                        [lf_audio, lf_stats],
+                    )
+
     refresh_btn.click(
         refresh_lists,
         None,
@@ -931,5 +1244,6 @@ with gr.Blocks() as demo:
     )
     stop_btn.click(stop_current, None, None)
     exit_btn.click(exit_app, None, None)
+    demo.load(tts_cleanup_files)
 if __name__ == "__main__":
     demo.launch(server_port=18188)
