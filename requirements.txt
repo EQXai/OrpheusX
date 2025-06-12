@@ -16,6 +16,8 @@ pandas
 
 # Web UI
 gradio
+orpheus-speech
+vllm
 
 # Testing & tooling (optional)
-pytest 
+pytest
