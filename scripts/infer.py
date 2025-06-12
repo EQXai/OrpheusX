@@ -16,7 +16,10 @@ from orpheusx.utils.segment_utils import (
     split_prompt_by_sentences as _split_prompt_by_sentences,
     print_segment_log as _print_segment_log,
 )
-from orpheusx.utils.longform import generate_segments_parallel
+from orpheusx.utils.longform import (
+    generate_segments_parallel,
+    generate_long_form_speech_async,
+)
 
 # Root of repository to load helper modules when run from ``scripts`` directory
 import sys
@@ -228,22 +231,32 @@ def main():
         if not text:
             break
         if args.segment:
-            if args.segment_by == 'sentence':
-                seg_text, segments = split_prompt_by_sentences(text, tokenizer, return_text=True)
-            else:
-                seg_text, segments = split_prompt_by_tokens(text, tokenizer, return_text=True)
-            print_segment_log(text, seg_text)
+            start_time = time.perf_counter()
+            final_audio = asyncio.run(
+                generate_long_form_speech_async(
+                    text,
+                    model,
+                    tokenizer,
+                    snac_model,
+                    segment=True,
+                    segment_by=args.segment_by,
+                    batch_size=args.batch_size if args.parallel else 1,
+                    max_new_tokens=args.max_tokens,
+                    fade_ms=args.fade_ms,
+                )
+            )
+            torch.cuda.empty_cache()
+            gc.collect()
         else:
-            segments = [tokenizer(text, return_tensors='pt').input_ids.squeeze(0)]
-        start_time = time.perf_counter()
-        if args.parallel:
+            single = tokenizer(text, return_tensors='pt').input_ids.squeeze(0)
+            start_time = time.perf_counter()
             final_audio = asyncio.run(
                 generate_segments_parallel(
-                    segments,
+                    [single],
                     model,
                     snac_model,
                     max_new_tokens=args.max_tokens,
-                    batch_size=args.batch_size,
+                    batch_size=args.batch_size if args.parallel else 1,
                     fade_ms=args.fade_ms,
                 )
             )
