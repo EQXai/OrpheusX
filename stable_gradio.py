@@ -65,7 +65,10 @@ def build_interface() -> gr.Blocks:
 
         run_btn.click(long_task_async, inputs=audio_in, outputs=output_box)
     # queue() keeps the connection alive for long jobs
-    demo.queue(concurrency_count=1)
+    # Use ``concurrency`` to limit parallel jobs. ``concurrency_count`` was
+    # removed in newer Gradio versions.
+    demo.queue(concurrency=1)
+
     return demo
 
 
@@ -73,7 +76,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Start the stable Gradio server")
     parser.add_argument("--share", action="store_true", help="Use gradio share mode")
     parser.add_argument("--server-name", default="127.0.0.1", help="Server name or IP")
-    parser.add_argument("--server-port", type=int, default=7860, help="Server port")
+    parser.add_argument(
+        "--server-port",
+        type=int,
+        default=18188,
+        help="Server port (default 18188)",
+    )
+
     args = parser.parse_args()
 
     if not check_port_available(args.server_port, args.server_name):
