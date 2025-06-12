@@ -45,11 +45,6 @@ If you prefer a simple web UI instead of the CLI, run:
 python gradio_app.py
 ```
 
-## 🌐 Terminal CLI
-
-```bash
-python scripts/orpheus_cli.py
-```
 
 # 📁 Where to place the audio dataset:
 
