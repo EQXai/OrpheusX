@@ -89,7 +89,7 @@ All features are available via an interactive command-line menu.
 
 ---
 
-The script will ask which port you want to use before launching.
+The script launches on port 18188 by default.
 The web UI lets you prepare datasets, train LoRAs and run inference.
 Training and inference tabs include dropdowns listing local datasets or
 available LoRA models and can also load prompt lists from `prompt_list/`.
