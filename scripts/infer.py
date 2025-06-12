@@ -7,6 +7,7 @@ import torchaudio
 import re
 import gc
 import time
+import asyncio
 from unsloth import FastLanguageModel
 from snac import SNAC
 from peft import PeftModel
@@ -15,6 +16,7 @@ from orpheusx.utils.segment_utils import (
     split_prompt_by_sentences as _split_prompt_by_sentences,
     print_segment_log as _print_segment_log,
 )
+from orpheusx.utils.longform import generate_segments_parallel
 
 # Root of repository to load helper modules when run from ``scripts`` directory
 import sys
@@ -154,6 +156,17 @@ def main():
         default=60,
         help='Crossfade duration in milliseconds',
     )
+    parser.add_argument(
+        '--parallel',
+        action='store_true',
+        help='Generate segments concurrently',
+    )
+    parser.add_argument(
+        '--batch_size',
+        type=int,
+        default=4,
+        help='Number of segments to process in parallel',
+    )
     args = parser.parse_args()
     model, tokenizer = load_model(args.model, args.lora)
 
@@ -223,17 +236,31 @@ def main():
         else:
             segments = [tokenizer(text, return_tensors='pt').input_ids.squeeze(0)]
         start_time = time.perf_counter()
-        final_audio = None
-        for ids in segments:
-            part = generate_audio_segment(
-                ids, model, snac_model, max_new_tokens=args.max_tokens
+        if args.parallel:
+            final_audio = asyncio.run(
+                generate_segments_parallel(
+                    segments,
+                    model,
+                    snac_model,
+                    max_new_tokens=args.max_tokens,
+                    batch_size=args.batch_size,
+                    fade_ms=args.fade_ms,
+                )
             )
-            if final_audio is None:
-                final_audio = part
-            else:
-                final_audio = concat_with_fade([final_audio, part], fade_ms=args.fade_ms)
             torch.cuda.empty_cache()
             gc.collect()
+        else:
+            final_audio = None
+            for ids in segments:
+                part = generate_audio_segment(
+                    ids, model, snac_model, max_new_tokens=args.max_tokens
+                )
+                if final_audio is None:
+                    final_audio = part
+                else:
+                    final_audio = concat_with_fade([final_audio, part], fade_ms=args.fade_ms)
+                torch.cuda.empty_cache()
+                gc.collect()
         if final_audio is None:
             continue
         elapsed = time.perf_counter() - start_time
