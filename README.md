@@ -83,6 +83,7 @@ python scripts/orpheus_cli.py
 - Segmentation mode prints the start and end index of each chunk so you know where text was split
 - Trained LoRA adapters are stored under `lora_models/<dataset>/lora_model`
 - Detailed logs for the CLI and Gradio interface are saved under `logs/orpheus.log`
+- The web UI includes **Cancel Task** and **Exit UI** buttons for quick control
 
 All features are available via an interactive command-line menu.
 
@@ -104,28 +105,25 @@ allows up to 2400 new tokens.
 
 ### Prompt Segmentation
 
-Long prompts can be split automatically during inference to avoid hitting the
-token limit. Use `--segment` along with `--segment-by tokens` (default),
-`--segment-by sentence`, or `--segment-by full_segment` to control how text is
-chunked. Sentence segmentation usually produces smoother audio because pauses
-occur at natural boundaries. The `full_segment` mode splits on every comma,
-period, question mark or exclamation point, producing the smallest possible
-chunks and ignoring the token count settings. When splitting by sentences,
-commas are also considered separators. The
-algorithm ignores consecutive commas and merges pieces shorter than three words
-with their neighbors so lists or short phrases aren't broken awkwardly. Enable
-sentence segmentation for long prompts with natural pause points.
+Long prompts can be split automatically into sentence-based chunks so that very
+long texts can be processed in stages.  The `--segment` option in the CLI (and
+the checkbox in the web UI) enables this behavior.  Text is divided at sentence
+boundaries and grouped into pieces of roughly a configurable number of
+characters (300 by default).  Each chunk ends with punctuation, which keeps the
+generated speech natural when the parts are reassembled.  You can adjust the
+maximum chunk length to trade off quality for speed.
 
-The Gradio interface lets you choose which punctuation characters trigger
-segmentation (comma, period, question mark and exclamation point) and specify a
-minimum and maximum token count for each segment. The limits are ignored when
-`full_segment` is selected.
-
-There is also a **Full Segment Test** tab in the web UI. This simplified
-interface exposes only character-based segmentation so you can verify how the
-`full_segment` mode splits prompts without any token settings.
 
 While generating audio, the CLI prints a segmentation log showing where each
 chunk starts and ends. After all segments are generated they are automatically
 crossfaded to hide the cuts. The default fade length is 60 ms.
+
+### Parallel Generation
+
+Long-form synthesis can be accelerated by processing segments concurrently.
+The `scripts/infer.py` tool accepts `--parallel` to enable this mode and
+`--batch_size` to control how many chunks run at once. The Gradio web UI
+exposes the same setting in Advanced Settings via a checkbox and batch size
+input. Parallel mode reduces overall latency on capable GPUs when working with
+very long prompts.
 

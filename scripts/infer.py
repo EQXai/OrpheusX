@@ -7,6 +7,7 @@ import torchaudio
 import re
 import gc
 import time
+import asyncio
 from unsloth import FastLanguageModel
 from snac import SNAC
 from peft import PeftModel
@@ -14,6 +15,10 @@ from orpheusx.utils.segment_utils import (
     split_prompt_by_tokens as _split_prompt_by_tokens,
     split_prompt_by_sentences as _split_prompt_by_sentences,
     print_segment_log as _print_segment_log,
+)
+from orpheusx.utils.longform import (
+    generate_segments_parallel,
+    generate_long_form_speech_async,
 )
 
 # Root of repository to load helper modules when run from ``scripts`` directory
@@ -138,9 +143,8 @@ def main():
     parser.add_argument('--segment', action='store_true', help='Segment prompts')
     parser.add_argument(
         '--segment-by',
-        choices=['tokens', 'sentence'],
-        default='tokens',
-        help='Segmentation method when using --segment',
+        default='sentence',
+        help='Segmentation method (reserved)',
     )
     parser.add_argument(
         '--max_tokens',
@@ -153,6 +157,17 @@ def main():
         type=int,
         default=60,
         help='Crossfade duration in milliseconds',
+    )
+    parser.add_argument(
+        '--parallel',
+        action='store_true',
+        help='Generate segments concurrently',
+    )
+    parser.add_argument(
+        '--batch_size',
+        type=int,
+        default=4,
+        help='Number of segments to process in parallel',
     )
     args = parser.parse_args()
     model, tokenizer = load_model(args.model, args.lora)
@@ -215,23 +230,34 @@ def main():
         if not text:
             break
         if args.segment:
-            if args.segment_by == 'sentence':
-                seg_text, segments = split_prompt_by_sentences(text, tokenizer, return_text=True)
-            else:
-                seg_text, segments = split_prompt_by_tokens(text, tokenizer, return_text=True)
-            print_segment_log(text, seg_text)
-        else:
-            segments = [tokenizer(text, return_tensors='pt').input_ids.squeeze(0)]
-        start_time = time.perf_counter()
-        final_audio = None
-        for ids in segments:
-            part = generate_audio_segment(
-                ids, model, snac_model, max_new_tokens=args.max_tokens
+            start_time = time.perf_counter()
+            final_audio = asyncio.run(
+                generate_long_form_speech_async(
+                    text,
+                    model,
+                    tokenizer,
+                    snac_model,
+                    segment=True,
+                    batch_size=args.batch_size if args.parallel else 1,
+                    max_new_tokens=args.max_tokens,
+                    fade_ms=args.fade_ms,
+                )
             )
-            if final_audio is None:
-                final_audio = part
-            else:
-                final_audio = concat_with_fade([final_audio, part], fade_ms=args.fade_ms)
+            torch.cuda.empty_cache()
+            gc.collect()
+        else:
+            single = tokenizer(text, return_tensors='pt').input_ids.squeeze(0)
+            start_time = time.perf_counter()
+            final_audio = asyncio.run(
+                generate_segments_parallel(
+                    [single],
+                    model,
+                    snac_model,
+                    max_new_tokens=args.max_tokens,
+                    batch_size=args.batch_size if args.parallel else 1,
+                    fade_ms=args.fade_ms,
+                )
+            )
             torch.cuda.empty_cache()
             gc.collect()
         if final_audio is None:
