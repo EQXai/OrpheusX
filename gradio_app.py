@@ -873,12 +873,10 @@ lora_choices = list_loras()
 prompt_files = list_prompt_files()
 
 
-def refresh_lists() -> tuple:
+def refresh_lists() -> gr.components.Dropdown:
 
     """Reload datasets, LoRAs and prompt lists from disk."""
-    return (
-        gr.update(choices=list_source_audio()),
-    )
+    return gr.update(choices=list_source_audio())
 
 with gr.Blocks() as demo:
     gr.Markdown("# OrpheusX Gradio Interface")
