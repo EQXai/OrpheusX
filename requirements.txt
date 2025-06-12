@@ -10,6 +10,8 @@ unsloth
 peft
 snac
 
+vllm
+
 # Data
 datasets
 pandas

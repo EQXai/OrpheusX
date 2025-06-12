@@ -10,6 +10,8 @@ from __future__ import annotations
 import os
 import sys
 import signal
+import subprocess
+import shutil
 from pathlib import Path
 import json
 import re
@@ -48,6 +50,37 @@ def stop_current() -> str:
 def exit_app() -> None:
     """Terminate the Gradio process."""
     os._exit(0)
+
+
+def launch_vllm_cli() -> str:
+    """Open the vLLM inference script in a new terminal window."""
+    script = REPO_ROOT / "scripts" / "infer_vllm.py"
+    cmd = [sys.executable, str(script)]
+    try:
+        if sys.platform.startswith("win"):
+            subprocess.Popen(["cmd", "/c", "start"] + cmd)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-a", "Terminal.app"] + cmd)
+        else:
+            terminal = None
+            for term in (
+                "x-terminal-emulator",
+                "gnome-terminal",
+                "konsole",
+                "xfce4-terminal",
+                "xterm",
+            ):
+                if shutil.which(term):
+                    terminal = term
+                    break
+            if terminal:
+                subprocess.Popen([terminal, "-e", " ".join(cmd)])
+            else:
+                subprocess.Popen(cmd)
+        return "infer_vllm.py launched"
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.exception("Failed to launch infer_vllm.py")
+        return f"Error launching: {exc}"
 
 
 def list_datasets() -> list[str]:
@@ -883,6 +916,7 @@ with gr.Blocks() as demo:
 
     refresh_btn = gr.Button("Refresh directories")
     stop_btn = gr.Button("Stop Task")
+    vllm_btn = gr.Button("Launch vLLM CLI")
     exit_btn = gr.Button("Exit")
 
     with gr.Tabs():
@@ -905,6 +939,7 @@ with gr.Blocks() as demo:
         [auto_dataset],
     )
     stop_btn.click(stop_current, None, None)
+    vllm_btn.click(launch_vllm_cli, None, None)
     exit_btn.click(exit_app, None, None)
 if __name__ == "__main__":
     demo.launch(server_port=18188)
