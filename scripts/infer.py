@@ -143,9 +143,8 @@ def main():
     parser.add_argument('--segment', action='store_true', help='Segment prompts')
     parser.add_argument(
         '--segment-by',
-        choices=['tokens', 'sentence'],
-        default='tokens',
-        help='Segmentation method when using --segment',
+        default='sentence',
+        help='Segmentation method (reserved)',
     )
     parser.add_argument(
         '--max_tokens',
@@ -239,7 +238,6 @@ def main():
                     tokenizer,
                     snac_model,
                     segment=True,
-                    segment_by=args.segment_by,
                     batch_size=args.batch_size if args.parallel else 1,
                     max_new_tokens=args.max_tokens,
                     fade_ms=args.fade_ms,

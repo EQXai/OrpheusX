@@ -5,18 +5,42 @@ from typing import List
 
 import torch
 
-from .segment_utils import (
-    split_prompt_by_tokens,
-    split_prompt_by_sentences,
-    print_segment_log,
-)
+import re
+from .segment_utils import print_segment_log
 from audio_utils import concat_with_fade
 
 __all__ = [
     "generate_segments_parallel",
     "generate_long_form_speech_async",
+    "chunk_text",
 ]
 
+
+def chunk_text(text: str, max_chunk_size: int = 300) -> List[str]:
+    """Split ``text`` into chunks of roughly ``max_chunk_size`` characters."""
+    text = re.sub(r"\s+", " ", text)
+    delimiter_pattern = r'(?<=[.!?])\s+'
+    segments = re.split(delimiter_pattern, text)
+    sentences: list[str] = []
+    for segment in segments:
+        segment = segment.strip()
+        if not segment:
+            continue
+        if segment[-1] not in '.!?':
+            segment += '.'
+        sentences.append(segment)
+
+    chunks: list[str] = []
+    current = ""
+    for sentence in sentences:
+        if len(current) + len(sentence) > max_chunk_size and current:
+            chunks.append(current)
+            current = sentence
+        else:
+            current += (" " + sentence) if current else sentence
+    if current:
+        chunks.append(current)
+    return chunks
 
 def _generate_segment(
     tokens: torch.Tensor,
@@ -126,8 +150,7 @@ async def generate_long_form_speech_async(
     snac_model,
     *,
     segment: bool = True,
-    segment_by: str = "sentence",
-    chunk_size: int = 50,
+    chunk_size: int = 300,
     batch_size: int = 4,
     max_new_tokens: int = 1200,
     fade_ms: int = 60,
@@ -136,15 +159,10 @@ async def generate_long_form_speech_async(
     """Split ``text`` into chunks, generate them in parallel and concatenate."""
 
     if segment:
-        if segment_by == "tokens":
-            seg_text, segments = split_prompt_by_tokens(
-                text, tokenizer, chunk_size=chunk_size, return_text=True
-            )
-        else:
-            seg_text, segments = split_prompt_by_sentences(
-                text, tokenizer, chunk_size=chunk_size, return_text=True
-            )
+        seg_text = chunk_text(text, max_chunk_size=chunk_size)
         print_segment_log(text, seg_text)
+        segments = [tokenizer(s, return_tensors="pt").input_ids.squeeze(0) for s in seg_text]
+
     else:
         segments = [tokenizer(text, return_tensors="pt").input_ids.squeeze(0)]
 

@@ -671,7 +671,7 @@ def generate_audio(
     segment_by: str = "tokens",
     seg_chars: list[str] | None = None,
     seg_min_tokens: int = 0,
-    seg_max_tokens: int = 50,
+    seg_max_tokens: int = 300,
     seg_gap: float = 0.0,
     fade_ms: int = 60,
     parallel: bool = False,
@@ -717,7 +717,7 @@ def generate_audio(
                     tokenizer,
                     snac_model,
                     segment=True,
-                    segment_by=segment_by,
+
                     chunk_size=seg_max_tokens,
                     batch_size=batch_size if parallel else 1,
                     max_new_tokens=max_new_tokens,
@@ -877,10 +877,7 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tupl
             ds_name,
             max_new_tokens=2400,
             segment=True,
-            segment_by="sentence",
-            seg_chars=[",", ".", "?", "!"],
-            seg_min_tokens=0,
-            seg_max_tokens=50,
+            seg_max_tokens=300,
             seg_gap=0.0,
             fade_ms=fade_ms,
         )
@@ -1015,7 +1012,7 @@ with gr.Blocks() as demo:
                             label="Segment characters",
                         )
                         seg_min_tokens = gr.Number(value=0, precision=0, label="Min tokens per segment")
-                        seg_max_tokens = gr.Number(value=50, precision=0, label="Max tokens per segment")
+                        seg_max_tokens = gr.Number(value=300, precision=0, label="Max characters per chunk")
                         seg_gap = gr.Number(value=0.0, precision=1, label="Gap between segments (s)")
                         fade_ms_inp = gr.Number(value=60, precision=0, label="Crossfade (ms)")
                         parallel_chk = gr.Checkbox(label="Process in parallel")

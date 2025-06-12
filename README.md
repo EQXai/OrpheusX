@@ -105,22 +105,13 @@ allows up to 2400 new tokens.
 
 ### Prompt Segmentation
 
-Long prompts can be split automatically during inference to avoid hitting the
-token limit. Use `--segment` along with `--segment-by tokens` (default),
-`--segment-by sentence`, or `--segment-by full_segment` to control how text is
-chunked. Sentence segmentation usually produces smoother audio because pauses
-occur at natural boundaries. The `full_segment` mode splits on every comma,
-period, question mark or exclamation point, producing the smallest possible
-chunks and ignoring the token count settings. When splitting by sentences,
-commas are also considered separators. The
-algorithm ignores consecutive commas and merges pieces shorter than three words
-with their neighbors so lists or short phrases aren't broken awkwardly. Enable
-sentence segmentation for long prompts with natural pause points.
-
-The Gradio interface lets you choose which punctuation characters trigger
-segmentation (comma, period, question mark and exclamation point) and specify a
-minimum and maximum token count for each segment. The limits are ignored when
-`full_segment` is selected.
+Long prompts can be split automatically into sentence-based chunks so that very
+long texts can be processed in stages.  The `--segment` option in the CLI (and
+the checkbox in the web UI) enables this behavior.  Text is divided at sentence
+boundaries and grouped into pieces of roughly a configurable number of
+characters (300 by default).  Each chunk ends with punctuation, which keeps the
+generated speech natural when the parts are reassembled.  You can adjust the
+maximum chunk length to trade off quality for speed.
 
 
 While generating audio, the CLI prints a segmentation log showing where each
