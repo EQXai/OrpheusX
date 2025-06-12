@@ -120,3 +120,16 @@ While generating audio, the CLI prints a segmentation log showing where each
 chunk starts and ends. After all segments are generated they are automatically
 crossfaded to hide the cuts. The default fade length is 60 ms.
 
+### Running inference with vLLM
+
+For faster decoding you can use the optional `infer_vllm.py` script powered by [vLLM](https://github.com/vllm-project/vllm).
+After installing the extra dependency run:
+
+```bash
+python scripts/infer_vllm.py --model <model_name> --lora <path_to_lora>
+```
+
+The CLI options mirror those of `infer.py` and require a CUDA-capable GPU.
+You can also start the script from the Gradio interface using the **Launch vLLM CLI** button,
+which opens a new terminal window.
+
