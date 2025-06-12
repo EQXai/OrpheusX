@@ -16,10 +16,17 @@ from transformers import AutoTokenizer
 import gradio as gr
 import gc
 import time
+import asyncio
+import threading
+import signal
 from tools.logger_utils import get_logger
 
 # Helper for audio concatenation with crossfade
 from audio_utils import concat_with_fade
+from orpheusx.utils.longform import (
+    generate_segments_parallel,
+    generate_long_form_speech_async,
+)
 
 # The prepare_dataset helper can be imported safely
 from scripts.prepare_dataset import prepare_dataset
@@ -33,6 +40,20 @@ SOURCE_AUDIO_DIR = REPO_ROOT / "source_audio"
 MAX_PROMPTS = 5
 
 logger = get_logger("gradio_app")
+
+# Global flag for cancelling long-running tasks from the UI
+CANCEL_EVENT = threading.Event()
+
+
+def request_cancel() -> str:
+    """Signal any running task to cancel."""
+    CANCEL_EVENT.set()
+    return "Cancellation requested"
+
+
+def shutdown_server() -> None:
+    """Immediately stop the Gradio server."""
+    os._exit(0)
 
 
 def list_datasets() -> list[str]:
@@ -99,6 +120,10 @@ def prepare_datasets_ui(
     total = len(tasks)
     progress = gr.Progress()
     for idx, (audio_path, ds_name) in enumerate(tasks, start=1):
+        if CANCEL_EVENT.is_set():
+            CANCEL_EVENT.clear()
+            msgs.append("Cancelled")
+            break
         start = time.perf_counter()
         progress((idx - 1) / total, desc=f"Preparing {ds_name}...")
         out_dir = DATASETS_DIR / ds_name
@@ -303,6 +328,10 @@ def train_lora_single(
         ),
     )
 
+    if CANCEL_EVENT.is_set():
+        CANCEL_EVENT.clear()
+        return "Cancelled"
+
     trainer.train()
 
     model.save_pretrained(save_dir)
@@ -341,6 +370,10 @@ def train_loras(
     logger.info("Training %d LoRA(s)", total)
     progress = gr.Progress()
     for idx, (src, name, is_local) in enumerate(dataset_info, start=1):
+        if CANCEL_EVENT.is_set():
+            CANCEL_EVENT.clear()
+            msgs.append("Cancelled")
+            break
         progress((idx - 1) / total, desc=f"Training {name}...")
         start = time.perf_counter()
         try:
@@ -641,6 +674,8 @@ def generate_audio(
     seg_max_tokens: int = 50,
     seg_gap: float = 0.0,
     fade_ms: int = 60,
+    parallel: bool = False,
+    batch_size: int = 4,
 ) -> str:
     model_name = MODEL_NAME
     lora_path = None
@@ -654,50 +689,57 @@ def generate_audio(
     logger.info("Generating audio (%d tokens) using %s", token_count, lora_name or "base_model")
     start_time = time.perf_counter()
     if segment:
-        if segment_by == "sentence":
-            seg_text, segments = split_prompt_by_sentences(
-                text,
-                tokenizer,
-                chars=seg_chars,
-                max_tokens=seg_max_tokens,
-                min_tokens=seg_min_tokens,
-                return_text=True,
-            )
-        elif segment_by == "full_segment":
+        if segment_by == "full_segment":
             seg_text, segments = split_prompt_full(
                 text,
                 tokenizer,
                 chars=seg_chars,
                 return_text=True,
             )
-        else:
-            seg_text, segments = split_prompt_by_tokens(
-                text,
-                tokenizer,
-                max_tokens=seg_max_tokens,
-                min_tokens=seg_min_tokens,
-                return_text=True,
+            print_segment_log(text, seg_text)
+            batch = batch_size if parallel else 1
+            final_audio = asyncio.run(
+                generate_segments_parallel(
+                    segments,
+                    model,
+                    snac_model,
+                    max_new_tokens=max_new_tokens,
+                    batch_size=batch,
+                    fade_ms=fade_ms,
+                    gap_ms=int(seg_gap * 1000),
+                )
             )
-        print_segment_log(text, seg_text)
-        for i, seg in enumerate(segments, 1):
-            logger.info("Segment %d tokens: %d", i, seg.numel())
+        else:
+            final_audio = asyncio.run(
+                generate_long_form_speech_async(
+                    text,
+                    model,
+                    tokenizer,
+                    snac_model,
+                    segment=True,
+                    segment_by=segment_by,
+                    chunk_size=seg_max_tokens,
+                    batch_size=batch_size if parallel else 1,
+                    max_new_tokens=max_new_tokens,
+                    fade_ms=fade_ms,
+                    gap_ms=int(seg_gap * 1000),
+                )
+            )
     else:
         single = tokenizer(text, return_tensors='pt').input_ids.squeeze(0)
-        logger.info("Single segment tokens: %d", single.numel())
-        segments = [single]
-    final_audio = None
-    for s in segments:
-        part = generate_audio_segment(
-            s, model, snac_model, max_new_tokens=max_new_tokens
-        )
-        if final_audio is None:
-            final_audio = part
-        else:
-            final_audio = concat_with_fade(
-                [final_audio, part], sample_rate=24000, fade_ms=fade_ms, gap_ms=int(seg_gap * 1000)
+        final_audio = asyncio.run(
+            generate_segments_parallel(
+                [single],
+                model,
+                snac_model,
+                max_new_tokens=max_new_tokens,
+                batch_size=batch_size if parallel else 1,
+                fade_ms=fade_ms,
+                gap_ms=int(seg_gap * 1000),
             )
-        torch.cuda.empty_cache()
-        gc.collect()
+        )
+    torch.cuda.empty_cache()
+    gc.collect()
     if final_audio is None:
         return ""
     elapsed = time.perf_counter() - start_time
@@ -728,6 +770,8 @@ def generate_batch(
     seg_max_tokens: int,
     seg_gap: float = 0.0,
     fade_ms: int = 60,
+    parallel: bool = False,
+    batch_size: int = 4,
 ) -> tuple[str, str]:
     """Generate audio for multiple prompts/LORAs."""
     if not prompts:
@@ -739,7 +783,13 @@ def generate_batch(
     step = 0
     progress = gr.Progress()
     for lora in loras:
+        if CANCEL_EVENT.is_set():
+            CANCEL_EVENT.clear()
+            break
         for text in prompts:
+            if CANCEL_EVENT.is_set():
+                CANCEL_EVENT.clear()
+                break
             progress(step / total, desc=f"Generating {lora or 'base'}...")
             logger.info("Generating prompt '%s' with lora '%s'", text, lora or 'base_model')
             path = generate_audio(
@@ -756,6 +806,8 @@ def generate_batch(
                 seg_max_tokens,
                 seg_gap,
                 fade_ms,
+                parallel,
+                batch_size,
             )
             torch.cuda.empty_cache()
             gc.collect()
@@ -795,12 +847,18 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tupl
     progress = gr.Progress()
     msgs = []
     if not dataset_dir.is_dir():
+        if CANCEL_EVENT.is_set():
+            CANCEL_EVENT.clear()
+            return "Cancelled", ""
         progress(0.0, desc="Preparing dataset")
         prepare_dataset(str(audio_path), str(dataset_dir))
         msgs.append("Dataset prepared")
     else:
         msgs.append("Dataset already prepared")
     if not lora_dir.is_dir():
+        if CANCEL_EVENT.is_set():
+            CANCEL_EVENT.clear()
+            return "Cancelled", ""
         progress(0.33, desc="Training LoRA")
         train_lora_single(str(dataset_dir), ds_name, True)
         msgs.append("LoRA trained")
@@ -809,6 +867,9 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tupl
     tokenizer = get_pipeline_tokenizer()
     token_len = len(tokenizer(prompt, add_special_tokens=False).input_ids)
     use_segmentation = token_len > 50
+    if CANCEL_EVENT.is_set():
+        CANCEL_EVENT.clear()
+        return "Cancelled", ""
     progress(0.66, desc="Generating audio")
     if use_segmentation:
         out_path = generate_audio(
@@ -845,13 +906,15 @@ def refresh_lists() -> tuple:
         gr.update(choices=list_prompt_files()),
         gr.update(choices=list_source_audio()),
         gr.update(choices=list_source_audio()),
-        gr.update(choices=list_source_audio()),
     )
 
 with gr.Blocks() as demo:
     gr.Markdown("# OrpheusX Gradio Interface")
 
-    refresh_btn = gr.Button("Refresh directories")
+    with gr.Row():
+        refresh_btn = gr.Button("Refresh directories")
+        cancel_btn = gr.Button("Cancel Task")
+        exit_btn = gr.Button("Exit UI")
 
     with gr.Tabs():
         with gr.Tab("Unified"):
@@ -955,6 +1018,8 @@ with gr.Blocks() as demo:
                         seg_max_tokens = gr.Number(value=50, precision=0, label="Max tokens per segment")
                         seg_gap = gr.Number(value=0.0, precision=1, label="Gap between segments (s)")
                         fade_ms_inp = gr.Number(value=60, precision=0, label="Crossfade (ms)")
+                        parallel_chk = gr.Checkbox(label="Process in parallel")
+                        batch_size_inp = gr.Number(value=4, precision=0, label="Parallel batch size")
 
                     def _apply_preset(preset: str):
                         if preset == "Long Audio":
@@ -996,6 +1061,8 @@ with gr.Blocks() as demo:
                         seg_max = int(args[base_idx + 11] or 50)
                         seg_gap = float(args[base_idx + 12] or 0)
                         fade_ms = int(args[base_idx + 13] or 60)
+                        parallel = bool(args[base_idx + 14])
+                        batch_size = int(args[base_idx + 15] or 4)
 
                         if profile == "Long Audio":
                             segment = True
@@ -1022,6 +1089,8 @@ with gr.Blocks() as demo:
                             seg_max,
                             seg_gap,
                             fade_ms,
+                            parallel,
+                            batch_size,
                         )
 
                     infer_btn.click(
@@ -1044,6 +1113,8 @@ with gr.Blocks() as demo:
                             seg_max_tokens,
                             seg_gap,
                             fade_ms_inp,
+                            parallel_chk,
+                            batch_size_inp,
                         ],
                         [gallery, last_audio],
                     )
@@ -1052,84 +1123,13 @@ with gr.Blocks() as demo:
 
 
 
-        with gr.Tab("TESTING"):
-            with gr.Tabs():
-                with gr.Tab("Prepare Dataset (Tokens)"):
-                    audio_input_tok = gr.Audio(type="filepath", label="Upload audio")
-                    local_audio_tok = gr.Dropdown(choices=list_source_audio(), multiselect=True, label="Existing audio file(s)")
-                    dataset_name_tok = gr.Textbox(label="Dataset Name (for upload)")
-                    min_tokens_inp = gr.Number(value=0, precision=0, label="Min tokens per segment")
-                    max_tokens_inp = gr.Number(value=50, precision=0, label="Max tokens per segment")
-                    prepare_btn_tok = gr.Button("Prepare")
-                    prepare_output_tok = gr.Textbox()
-                    prepare_btn_tok.click(
-                        prepare_datasets_ui,
-                        [
-                            audio_input_tok,
-                            dataset_name_tok,
-                            local_audio_tok,
-                            min_tokens_inp,
-                            max_tokens_inp,
-                        ],
-                        prepare_output_tok,
-                    )
-
-                with gr.Tab("Full Segment Test"):
-                    fs_prompt = gr.Textbox(label="Prompt")
-                    fs_lora = gr.Dropdown(choices=["<base>"] + lora_choices, multiselect=True, label="LoRA(s)")
-                    fs_chars = gr.CheckboxGroup([",", ".", "?", "!"], value=[",", ".", "?", "!"], label="Segment characters")
-                    with gr.Accordion("Advanced Settings", open=False):
-                        fs_temperature = gr.Slider(0.1, 1.5, value=0.6, label="Temperature")
-                        fs_top_p = gr.Slider(0.5, 1.0, value=0.95, label="Top P")
-                        fs_rep_penalty = gr.Slider(1.0, 2.0, value=1.1, label="Repetition Penalty")
-                        fs_max_tokens = gr.Number(value=1200, precision=0, label="Max New Tokens")
-                        fs_gap = gr.Number(value=0.0, precision=1, label="Gap between segments (s)")
-                        fs_fade_ms = gr.Number(value=60, precision=0, label="Crossfade (ms)")
-                    fs_btn = gr.Button("Generate")
-                    fs_clear = gr.Button("Clear Gallery")
-                    fs_gallery = gr.HTML(label="Outputs")
-                    fs_last_audio = gr.Audio(label="Last Audio")
-
-                    def run_full_seg(prompt, loras, temp, top_p_val, rep, max_tok, seg_chars, gap, fade):
-                        return generate_batch(
-                            [prompt] if prompt else [],
-                            loras or [None],
-                            temp,
-                            top_p_val,
-                            rep,
-                            max_tok,
-                            True,
-                            "full_segment",
-                            seg_chars or [],
-                            0,
-                            50,
-                            gap,
-                            fade,
-                        )
-
-                    fs_btn.click(
-                        run_full_seg,
-                        [
-                            fs_prompt,
-                            fs_lora,
-                            fs_temperature,
-                            fs_top_p,
-                            fs_rep_penalty,
-                            fs_max_tokens,
-                            fs_chars,
-                            fs_gap,
-                            fs_fade_ms,
-                        ],
-                        [fs_gallery, fs_last_audio],
-                    )
-
-                    fs_clear.click(lambda: ("", None), None, [fs_gallery, fs_last_audio], queue=False)
-
     refresh_btn.click(
         refresh_lists,
         None,
-        [local_ds, lora_used, prompt_list_dd, local_audio, local_audio_tok, auto_dataset],
+        [local_ds, lora_used, prompt_list_dd, local_audio, auto_dataset],
     )
+    cancel_btn.click(request_cancel, None, None, queue=False)
+    exit_btn.click(shutdown_server, None, None, queue=False)
 if __name__ == "__main__":
     port_input = input("Which port should Gradio use? (default 7860): ")
     try:

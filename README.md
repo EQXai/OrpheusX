@@ -83,6 +83,7 @@ python scripts/orpheus_cli.py
 - Segmentation mode prints the start and end index of each chunk so you know where text was split
 - Trained LoRA adapters are stored under `lora_models/<dataset>/lora_model`
 - Detailed logs for the CLI and Gradio interface are saved under `logs/orpheus.log`
+- The web UI includes **Cancel Task** and **Exit UI** buttons for quick control
 
 All features are available via an interactive command-line menu.
 
@@ -121,11 +122,17 @@ segmentation (comma, period, question mark and exclamation point) and specify a
 minimum and maximum token count for each segment. The limits are ignored when
 `full_segment` is selected.
 
-There is also a **Full Segment Test** tab in the web UI. This simplified
-interface exposes only character-based segmentation so you can verify how the
-`full_segment` mode splits prompts without any token settings.
 
 While generating audio, the CLI prints a segmentation log showing where each
 chunk starts and ends. After all segments are generated they are automatically
 crossfaded to hide the cuts. The default fade length is 60 ms.
+
+### Parallel Generation
+
+Long-form synthesis can be accelerated by processing segments concurrently.
+The `scripts/infer.py` tool accepts `--parallel` to enable this mode and
+`--batch_size` to control how many chunks run at once. The Gradio web UI
+exposes the same setting in Advanced Settings via a checkbox and batch size
+input. Parallel mode reduces overall latency on capable GPUs when working with
+very long prompts.
 
