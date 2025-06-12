@@ -68,6 +68,7 @@ def build_interface() -> gr.Blocks:
     # Use ``concurrency`` to limit parallel jobs. ``concurrency_count`` was
     # removed in newer Gradio versions.
     demo.queue(concurrency=1)
+
     return demo
 
 
@@ -81,6 +82,7 @@ def main() -> None:
         default=18188,
         help="Server port (default 18188)",
     )
+
     args = parser.parse_args()
 
     if not check_port_available(args.server_port, args.server_name):
