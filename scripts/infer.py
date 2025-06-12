@@ -260,6 +260,18 @@ def main():
             )
             torch.cuda.empty_cache()
             gc.collect()
+        else:
+            final_audio = None
+            for ids in segments:
+                part = generate_audio_segment(
+                    ids, model, snac_model, max_new_tokens=args.max_tokens
+                )
+                if final_audio is None:
+                    final_audio = part
+                else:
+                    final_audio = concat_with_fade([final_audio, part], fade_ms=args.fade_ms)
+                torch.cuda.empty_cache()
+                gc.collect()
         if final_audio is None:
             continue
         elapsed = time.perf_counter() - start_time

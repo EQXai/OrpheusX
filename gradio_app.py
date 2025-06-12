@@ -7,6 +7,7 @@ import logging
 import re
 import asyncio
 
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -180,6 +181,7 @@ async def generate_long_form_speech_async(long_text, voice, temperature, top_p, 
                 output.writeframes(data[i][1])
 
     for file in all_audio_files:
+
         try:
             os.remove(file)
         except Exception as e:
@@ -212,6 +214,7 @@ def generate_long_form_speech(long_text, voice, temperature, top_p, repetition_p
             generate_long_form_speech_async(
                 long_text, voice, temperature, top_p,
                 repetition_penalty, batch_size, max_tokens, progress
+
             )
         )
     finally:
@@ -335,7 +338,6 @@ The concert was amazing! You should have seen the light show!
 
         demo.load(cleanup_files)
     return demo
-
 
 if __name__ == "__main__":
     logger.info("Starting OrpheusTTS-WebUI")
