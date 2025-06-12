@@ -65,7 +65,11 @@ def build_interface() -> gr.Blocks:
 
         run_btn.click(long_task_async, inputs=audio_in, outputs=output_box)
     # queue() keeps the connection alive for long jobs
-    demo.queue(concurrency_count=1)
+    # ``concurrency_count`` was removed in newer versions of Gradio; just
+    # enabling queuing is sufficient to keep the connection alive for long
+    # tasks.  If a specific concurrency limit is needed, use the ``concurrency``
+    # parameter instead (e.g. ``demo.queue(concurrency=1)``).
+    demo.queue()
     return demo
 
 
