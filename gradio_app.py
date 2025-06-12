@@ -18,6 +18,7 @@ from transformers import AutoTokenizer
 import gradio as gr
 import gc
 import time
+import asyncio
 from tools.logger_utils import get_logger
 
 # Helper for audio concatenation with crossfade
@@ -664,6 +665,7 @@ def generate_audio(
     seg_max_tokens: int = 50,
     seg_gap: float = 0.0,
     fade_ms: int = 60,
+    async_mode: bool = False,
 ) -> str:
     model_name = MODEL_NAME
     lora_path = None
@@ -709,18 +711,41 @@ def generate_audio(
         logger.info("Single segment tokens: %d", single.numel())
         segments = [single]
     final_audio = None
-    for s in segments:
-        part = generate_audio_segment(
-            s, model, snac_model, max_new_tokens=max_new_tokens
-        )
-        if final_audio is None:
-            final_audio = part
-        else:
-            final_audio = concat_with_fade(
-                [final_audio, part], sample_rate=24000, fade_ms=fade_ms, gap_ms=int(seg_gap * 1000)
+    if async_mode:
+        async def worker(tok: torch.Tensor) -> torch.Tensor:
+            return await asyncio.to_thread(
+                generate_audio_segment,
+                tok,
+                model,
+                snac_model,
+                max_new_tokens=max_new_tokens,
             )
-        torch.cuda.empty_cache()
-        gc.collect()
+
+        loop = asyncio.new_event_loop()
+        parts = loop.run_until_complete(asyncio.gather(*(worker(s) for s in segments)))
+        loop.close()
+        for part in parts:
+            if final_audio is None:
+                final_audio = part
+            else:
+                final_audio = concat_with_fade(
+                    [final_audio, part], sample_rate=24000, fade_ms=fade_ms, gap_ms=int(seg_gap * 1000)
+                )
+            torch.cuda.empty_cache()
+            gc.collect()
+    else:
+        for s in segments:
+            part = generate_audio_segment(
+                s, model, snac_model, max_new_tokens=max_new_tokens
+            )
+            if final_audio is None:
+                final_audio = part
+            else:
+                final_audio = concat_with_fade(
+                    [final_audio, part], sample_rate=24000, fade_ms=fade_ms, gap_ms=int(seg_gap * 1000)
+                )
+            torch.cuda.empty_cache()
+            gc.collect()
     if final_audio is None:
         return ""
     elapsed = time.perf_counter() - start_time
