@@ -42,7 +42,6 @@ def chunk_text(text: str, max_chunk_size: int = 300) -> List[str]:
         chunks.append(current)
     return chunks
 
-
 def _generate_segment(
     tokens: torch.Tensor,
     model,

@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 # Cancel event used by UI buttons
 cancel_event = asyncio.Event()
 
+
 # Global variables
 model = None
 MODEL_SAMPLE_RATE = 24000
@@ -132,6 +133,7 @@ async def generate_long_form_speech_async(long_text, voice, temperature, top_p, 
         cancel_event.clear()
         raise gr.Error("Task cancelled")
 
+
     start_time = time.monotonic()
     if progress is not None:
         progress(0, desc="Preparing text chunks")
@@ -155,6 +157,7 @@ async def generate_long_form_speech_async(long_text, voice, temperature, top_p, 
         async with semaphore:
             if cancel_event.is_set():
                 raise asyncio.CancelledError()
+
             try:
                 filename, duration = await process_chunk(
                     chunk, voice, temperature, top_p, repetition_penalty,
@@ -177,11 +180,13 @@ async def generate_long_form_speech_async(long_text, voice, temperature, top_p, 
             t.cancel()
         raise gr.Error("Task cancelled")
 
+
     for filename, duration in results:
         all_audio_files.append(filename)
         total_duration += duration
         if cancel_event.is_set():
             raise gr.Error("Task cancelled")
+
     if progress is not None:
         progress(0.9, desc="Combining audio files")
 
@@ -200,6 +205,7 @@ async def generate_long_form_speech_async(long_text, voice, temperature, top_p, 
                 output.writeframes(data[i][1])
 
     for file in all_audio_files:
+
         try:
             os.remove(file)
         except Exception as e:
@@ -232,6 +238,7 @@ def generate_long_form_speech(long_text, voice, temperature, top_p, repetition_p
             generate_long_form_speech_async(
                 long_text, voice, temperature, top_p,
                 repetition_penalty, batch_size, max_tokens, progress
+
             )
         )
     finally:
@@ -247,7 +254,6 @@ def request_cancel():
 def shutdown_server():
     """Exit the process immediately."""
     os._exit(0)
-
 
 def cleanup_files():
     count = 0
@@ -291,7 +297,6 @@ def create_ui():
 
         cancel_btn.click(fn=request_cancel, queue=False)
         exit_btn.click(fn=shutdown_server, queue=False)
-
         with gr.Tabs(selected=0) as tabs:
             with gr.Tab("Single Text"):
                 with gr.Row():
@@ -357,6 +362,7 @@ The concert was amazing! You should have seen the light show!
                             label="Example Prompts",
                         )
                     with gr.Column(scale=1):
+
                         lf_audio_output = gr.Audio(label="Generated Long Form Speech")
                         lf_result_text = gr.Textbox(label="Generation Stats", interactive=False)
                 lf_submit_btn.click(
@@ -373,7 +379,6 @@ The concert was amazing! You should have seen the light show!
 
         demo.load(cleanup_files)
     return demo
-
 
 if __name__ == "__main__":
     logger.info("Starting OrpheusTTS-WebUI")
