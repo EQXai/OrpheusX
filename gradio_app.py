@@ -16,10 +16,12 @@ from transformers import AutoTokenizer
 import gradio as gr
 import gc
 import time
+import asyncio
 from tools.logger_utils import get_logger
 
 # Helper for audio concatenation with crossfade
 from audio_utils import concat_with_fade
+from orpheusx.utils.longform import generate_segments_parallel
 
 # The prepare_dataset helper can be imported safely
 from scripts.prepare_dataset import prepare_dataset
@@ -641,6 +643,8 @@ def generate_audio(
     seg_max_tokens: int = 50,
     seg_gap: float = 0.0,
     fade_ms: int = 60,
+    parallel: bool = False,
+    batch_size: int = 4,
 ) -> str:
     model_name = MODEL_NAME
     lora_path = None
@@ -685,19 +689,34 @@ def generate_audio(
         single = tokenizer(text, return_tensors='pt').input_ids.squeeze(0)
         logger.info("Single segment tokens: %d", single.numel())
         segments = [single]
-    final_audio = None
-    for s in segments:
-        part = generate_audio_segment(
-            s, model, snac_model, max_new_tokens=max_new_tokens
-        )
-        if final_audio is None:
-            final_audio = part
-        else:
-            final_audio = concat_with_fade(
-                [final_audio, part], sample_rate=24000, fade_ms=fade_ms, gap_ms=int(seg_gap * 1000)
+    if parallel:
+        final_audio = asyncio.run(
+            generate_segments_parallel(
+                segments,
+                model,
+                snac_model,
+                max_new_tokens=max_new_tokens,
+                batch_size=batch_size,
+                fade_ms=fade_ms,
+                gap_ms=int(seg_gap * 1000),
             )
+        )
         torch.cuda.empty_cache()
         gc.collect()
+    else:
+        final_audio = None
+        for s in segments:
+            part = generate_audio_segment(
+                s, model, snac_model, max_new_tokens=max_new_tokens
+            )
+            if final_audio is None:
+                final_audio = part
+            else:
+                final_audio = concat_with_fade(
+                    [final_audio, part], sample_rate=24000, fade_ms=fade_ms, gap_ms=int(seg_gap * 1000)
+                )
+            torch.cuda.empty_cache()
+            gc.collect()
     if final_audio is None:
         return ""
     elapsed = time.perf_counter() - start_time
@@ -728,6 +747,8 @@ def generate_batch(
     seg_max_tokens: int,
     seg_gap: float = 0.0,
     fade_ms: int = 60,
+    parallel: bool = False,
+    batch_size: int = 4,
 ) -> tuple[str, str]:
     """Generate audio for multiple prompts/LORAs."""
     if not prompts:
@@ -756,6 +777,8 @@ def generate_batch(
                 seg_max_tokens,
                 seg_gap,
                 fade_ms,
+                parallel,
+                batch_size,
             )
             torch.cuda.empty_cache()
             gc.collect()
@@ -955,6 +978,8 @@ with gr.Blocks() as demo:
                         seg_max_tokens = gr.Number(value=50, precision=0, label="Max tokens per segment")
                         seg_gap = gr.Number(value=0.0, precision=1, label="Gap between segments (s)")
                         fade_ms_inp = gr.Number(value=60, precision=0, label="Crossfade (ms)")
+                        parallel_chk = gr.Checkbox(label="Process in parallel")
+                        batch_size_inp = gr.Number(value=4, precision=0, label="Parallel batch size")
 
                     def _apply_preset(preset: str):
                         if preset == "Long Audio":
@@ -996,6 +1021,8 @@ with gr.Blocks() as demo:
                         seg_max = int(args[base_idx + 11] or 50)
                         seg_gap = float(args[base_idx + 12] or 0)
                         fade_ms = int(args[base_idx + 13] or 60)
+                        parallel = bool(args[base_idx + 14])
+                        batch_size = int(args[base_idx + 15] or 4)
 
                         if profile == "Long Audio":
                             segment = True
@@ -1022,6 +1049,8 @@ with gr.Blocks() as demo:
                             seg_max,
                             seg_gap,
                             fade_ms,
+                            parallel,
+                            batch_size,
                         )
 
                     infer_btn.click(
@@ -1044,6 +1073,8 @@ with gr.Blocks() as demo:
                             seg_max_tokens,
                             seg_gap,
                             fade_ms_inp,
+                            parallel_chk,
+                            batch_size_inp,
                         ],
                         [gallery, last_audio],
                     )
