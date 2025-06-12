@@ -7,10 +7,12 @@ modifying them.
 """
 from __future__ import annotations
 
+import argparse
 import os
 from pathlib import Path
 import json
 import re
+import socket
 import unsloth  # must be imported before transformers
 from transformers import AutoTokenizer
 import gradio as gr
@@ -55,6 +57,17 @@ def exit_gradio() -> None:
     os._exit(0)
 
 logger = get_logger("gradio_app")
+
+
+def check_port_available(port: int, host: str = "127.0.0.1") -> bool:
+    """Return True if ``host:port`` can be bound."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, port))
+        except OSError:
+            return False
+    return True
 
 
 def list_datasets() -> list[str]:
@@ -1093,5 +1106,37 @@ with gr.Blocks() as demo:
     )
     stop_btn.click(cancel_task, None, None, queue=False)
     exit_btn.click(exit_gradio, None, None, queue=False)
+    demo.queue()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Start the OrpheusX Gradio server"
+    )
+    parser.add_argument("--share", action="store_true", help="Use gradio share mode")
+    parser.add_argument(
+        "--server-name", default="127.0.0.1", help="Server name or IP"
+    )
+    parser.add_argument(
+        "--server-port",
+        type=int,
+        default=18188,
+        help="Server port (default 18188)",
+    )
+
+    args = parser.parse_args()
+
+    if not check_port_available(args.server_port, args.server_name):
+        raise SystemExit(f"Port {args.server_port} is already in use")
+
+    logger.info("Launching on %s:%d", args.server_name, args.server_port)
+    demo.launch(
+        share=args.share,
+        server_name=args.server_name,
+        server_port=args.server_port,
+        show_error=True,
+    )
+
+
 if __name__ == "__main__":
-    demo.launch(server_port=18188)
+    main()
