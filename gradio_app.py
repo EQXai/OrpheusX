@@ -882,7 +882,6 @@ def refresh_lists() -> tuple:
         gr.update(choices=list_prompt_files()),
         gr.update(choices=list_source_audio()),
         gr.update(choices=list_source_audio()),
-        gr.update(choices=list_source_audio()),
     )
 
 with gr.Blocks() as demo:
@@ -1094,7 +1093,7 @@ with gr.Blocks() as demo:
     refresh_btn.click(
         refresh_lists,
         None,
-        [local_ds, lora_used, prompt_list_dd, local_audio, local_audio_tok, auto_dataset],
+        [local_ds, lora_used, prompt_list_dd, local_audio, auto_dataset],
     )
     stop_btn.click(stop_current, None, None)
     exit_btn.click(exit_app, None, None)
