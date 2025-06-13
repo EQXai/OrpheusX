@@ -817,6 +817,7 @@ def generate_batch(
     return "\n".join(html_items), last_path
 
 
+
 def dataset_status(name: str) -> str:
     """Return model status message for a dataset."""
     ds_name = Path(name).stem
@@ -826,18 +827,20 @@ def dataset_status(name: str) -> str:
     return "Model not created"
 
 
-def dataset_status_multi(names: list[str]) -> str:
-    """Return status for multiple datasets."""
+def dataset_status_multi(names: typing.Any) -> str:
+    """Return status for one or more datasets."""
+    if not names:
+        return ""
+    if isinstance(names, str):
+        names = [names]
     msgs: list[str] = []
     for name in names:
-        ds_name = Path(name).stem
+        ds_name = Path(str(name)).stem
         lora_path = LORA_DIR / ds_name / "lora_model"
-        if lora_path.is_dir():
-            status = "Model already created"
-        else:
-            status = "Model not created"
+        status = "Model already created" if lora_path.is_dir() else "Model not created"
         msgs.append(f"{ds_name}: {status}")
     return "<br>".join(msgs)
+
 
 
 def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tuple[str, str]:
@@ -928,26 +931,38 @@ def run_full_pipeline_batch(
     max_tokens = 2400 if seg_needed else 1200
 
     msgs: list[str] = []
-    html_blocks: list[str] = []
+    html_blocks: dict[str, list[str]] = {
+        Path(d).stem: [] for d in dataset_files
+    }
     counters: dict[str, int] = {Path(d).stem: 0 for d in dataset_files}
     total_per_ds = len(prompts)
 
     def fmt_counters() -> str:
+        """Return progress for each dataset as ``Model: current/total`` lines."""
         return "\n".join(
-            f"Inferencia de {name}: {counters[name]}/{total_per_ds}" for name in counters
+            f"{name}: {counters[name]}/{total_per_ds}" for name in counters
         )
+
+    def build_html() -> str:
+        columns = []
+        for name, blocks in html_blocks.items():
+            column = [f"<div style='flex:1;padding-right:1em'><h3>{name}</h3>"]
+            column.extend(blocks)
+            column.append("</div>")
+            columns.append("".join(column))
+        return "<div style='display:flex;gap:1em'>" + "".join(columns) + "</div>"
 
     progress = gr.Progress()
     total_steps = len(dataset_files) * (len(prompts) + 2)
     step = 0
 
     # Initial counter display
-    yield "", fmt_counters(), ""
+    yield "", fmt_counters(), gr.update(value=build_html(), visible=False)
 
     for dataset_file in dataset_files:
         if STOP_FLAG:
             STOP_FLAG = False
-            yield "Stopped", fmt_counters(), "<hr/>".join(html_blocks)
+            yield "Stopped", fmt_counters(), gr.update(value=build_html(), visible=any(html_blocks.values()))
             return
         ds_name = Path(dataset_file).stem
         audio_path = SOURCE_AUDIO_DIR / dataset_file
@@ -961,10 +976,10 @@ def run_full_pipeline_batch(
         else:
             msgs.append(f"{ds_name}: dataset already prepared")
         step += 1
-        yield "\n".join(msgs), fmt_counters(), "<hr/>".join(html_blocks)
+        yield "\n".join(msgs), fmt_counters(), gr.update(value=build_html(), visible=any(html_blocks.values()))
         if STOP_FLAG:
             STOP_FLAG = False
-            yield "Stopped", fmt_counters(), "<hr/>".join(html_blocks)
+            yield "Stopped", fmt_counters(), gr.update(value=build_html(), visible=any(html_blocks.values()))
             return
 
         progress(step / total_steps, desc=f"Training {ds_name}")
@@ -974,10 +989,10 @@ def run_full_pipeline_batch(
         else:
             msgs.append(f"{ds_name}: LoRA already trained")
         step += 1
-        yield "\n".join(msgs), fmt_counters(), "<hr/>".join(html_blocks)
+        yield "\n".join(msgs), fmt_counters(), gr.update(value=build_html(), visible=any(html_blocks.values()))
         if STOP_FLAG:
             STOP_FLAG = False
-            yield "Stopped", fmt_counters(), "<hr/>".join(html_blocks)
+            yield "Stopped", fmt_counters(), gr.update(value=build_html(), visible=any(html_blocks.values()))
             return
 
         for text in prompts:
@@ -1016,11 +1031,11 @@ def run_full_pipeline_batch(
             except Exception:
                 logger.exception("Failed to read %s", path)
                 src = ""
-            html_blocks.append(
+            html_blocks[ds_name].append(
                 "".join(
                     [
                         "<div style='margin-bottom:1em'>",
-                        f"<p>{ds_name}: {text[:60]}</p>",
+                        f"<p>{text[:60]}</p>",
                         f"<audio controls src='{src}'></audio>",
                         "</div>",
                     ]
@@ -1028,13 +1043,13 @@ def run_full_pipeline_batch(
             )
             counters[ds_name] += 1
             step += 1
-            yield "\n".join(msgs), fmt_counters(), "<hr/>".join(html_blocks)
+            yield "\n".join(msgs), fmt_counters(), gr.update(value=build_html(), visible=any(html_blocks.values()))
             if STOP_FLAG:
                 STOP_FLAG = False
-                yield "Stopped", fmt_counters(), "<hr/>".join(html_blocks)
+                yield "Stopped", fmt_counters(), gr.update(value=build_html(), visible=any(html_blocks.values()))
                 return
     progress(1, desc="Done")
-    yield "\n".join(msgs), fmt_counters(), "<hr/>".join(html_blocks)
+    yield "\n".join(msgs), fmt_counters(), gr.update(value=build_html(), visible=any(html_blocks.values()))
 
 
 # ---- Gradio Interface ----
@@ -1070,7 +1085,7 @@ with gr.Blocks() as demo:
                     with gr.Row():
                         auto_log = gr.Textbox(scale=1)
                         auto_counter = gr.Textbox(scale=1)
-                    auto_output = gr.HTML()
+                    auto_output = gr.HTML(visible=False)
 
                     auto_dataset.change(dataset_status_multi, auto_dataset, auto_status)
                     auto_btn.click(
