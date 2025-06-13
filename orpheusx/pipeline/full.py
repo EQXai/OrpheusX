@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+import gradio as gr
 
 from tools.logger_utils import get_logger
 from scripts.prepare_dataset import prepare_dataset
@@ -117,6 +118,7 @@ def run_full_pipeline_batch(
     prompt_file: str | None,
     batch: int,
     fade_ms: int = 60,
+    progress: gr.Progress = gr.Progress(track_tqdm=True),
 ):
     from orpheusx import constants as _c
 
@@ -136,10 +138,13 @@ def run_full_pipeline_batch(
     msgs: list[str] = []
     html_blocks: list[str] = []
     total = len(dataset_files)
+    step_fraction = 1 / total
 
     tokenizer = get_pipeline_tokenizer()
     seg_needed = any(len(tokenizer(p, add_special_tokens=False).input_ids) > 50 for p in prompts)
     max_tokens = 2400 if seg_needed else 1200
+
+    progress(0)
 
     for idx, dataset_file in enumerate(dataset_files, 1):
         if _c.STOP_FLAG:
@@ -151,13 +156,14 @@ def run_full_pipeline_batch(
         dataset_dir = DATASETS_DIR / ds_name
         lora_dir = LORA_DIR / ds_name / "lora_model"
 
-        base_progress = (idx - 1) / total
+        base_progress = (idx - 1) * step_fraction
 
         if not dataset_dir.is_dir():
             prepare_dataset(str(audio_path), str(dataset_dir))
             msgs.append(f"{ds_name}: dataset prepared")
         else:
             msgs.append(f"{ds_name}: dataset already prepared")
+        progress(base_progress + step_fraction * 0.33)
 
         if _c.STOP_FLAG:
             _c.STOP_FLAG = False
@@ -168,6 +174,7 @@ def run_full_pipeline_batch(
             msgs.append(f"{ds_name}: LoRA trained")
         else:
             msgs.append(f"{ds_name}: LoRA already trained")
+        progress(base_progress + step_fraction * 0.66)
 
         if _c.STOP_FLAG:
             _c.STOP_FLAG = False
@@ -189,7 +196,9 @@ def run_full_pipeline_batch(
             fade_ms=fade_ms,
         )
         html_blocks.append(html)
+        progress(base_progress + step_fraction)
 
+    progress(1)
     return "\n".join(msgs), "<hr/>".join(html_blocks)
 
 __all__ = [
