@@ -831,7 +831,7 @@ def dataset_status_multi(names: list[str]) -> str:
         lora_path = LORA_DIR / ds_name / "lora_model"
         status = "Model already created" if lora_path.is_dir() else ""
         msgs.append(f"{ds_name}: {status}")
-    return "\n".join(msgs)
+    return "<br>".join(msgs)
 
 
 def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tuple[str, str]:
@@ -1016,4 +1016,5 @@ with gr.Blocks() as demo:
     stop_btn.click(stop_current, None, None)
     exit_btn.click(exit_app, None, None)
 if __name__ == "__main__":
+    demo.queue(default_concurrency_limit=2)
     demo.launch(server_port=18188)
