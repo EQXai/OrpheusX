@@ -877,6 +877,7 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tupl
     tokenizer = get_pipeline_tokenizer()
     token_len = len(tokenizer(prompt, add_special_tokens=False).input_ids)
     use_segmentation = token_len > 50
+    default_seg_chars = [",", ".", "?", "!"]
     progress(0.66, desc="Generating audio")
     if STOP_FLAG:
         STOP_FLAG = False
@@ -888,7 +889,7 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tupl
             max_new_tokens=2400,
             segment=True,
             segment_by="sentence",
-            seg_chars=[",", ".", "?", "!"],
+            seg_chars=default_seg_chars,
             seg_min_tokens=0,
             seg_max_tokens=50,
             seg_gap=0.0,
@@ -927,10 +928,12 @@ def run_full_pipeline_batch(
             return
         prompts = [prompt] * max(1, int(batch or 1))
 
-    if isinstance(seg_chars, str):
-        seg_chars = [c.strip() for c in seg_chars.split() if c.strip()]
-
-    max_tokens = max_new_tokens
+    tokenizer = get_pipeline_tokenizer()
+    seg_needed = any(
+        len(tokenizer(p, add_special_tokens=False).input_ids) > 50 for p in prompts
+    )
+    max_tokens = 2400 if seg_needed else 1200
+    default_seg_chars = [",", ".", "?", "!"]
 
     msgs: list[str] = []
     html_blocks: dict[str, list[str]] = {
@@ -1009,7 +1012,7 @@ def run_full_pipeline_batch(
                     max_new_tokens=max_tokens,
                     segment=True,
                     segment_by="sentence",
-                    seg_chars=[",", ".", "?", "!"],
+                    seg_chars=default_seg_chars,
                     seg_min_tokens=0,
                     seg_max_tokens=50,
                     seg_gap=0.0,
