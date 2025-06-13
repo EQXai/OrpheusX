@@ -877,6 +877,7 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tupl
     tokenizer = get_pipeline_tokenizer()
     token_len = len(tokenizer(prompt, add_special_tokens=False).input_ids)
     use_segmentation = token_len > 50
+    default_seg_chars = [",", ".", "?", "!"]
     progress(0.66, desc="Generating audio")
     if STOP_FLAG:
         STOP_FLAG = False
@@ -888,7 +889,7 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tupl
             max_new_tokens=2400,
             segment=True,
             segment_by="sentence",
-            seg_chars=[",", ".", "?", "!"],
+            seg_chars=default_seg_chars,
             seg_min_tokens=0,
             seg_max_tokens=50,
             seg_gap=0.0,
@@ -906,6 +907,9 @@ def run_full_pipeline_batch(
     prompt: str,
     prompt_file: str | None,
     batch: int,
+    temperature: float = 0.6,
+    top_p: float = 0.95,
+    repetition_penalty: float = 1.1,
     fade_ms: int = 60,
 ) -> typing.Generator[tuple[str, str, str], None, None]:
     """Run the full pipeline for multiple datasets and prompts with live counter."""
@@ -929,6 +933,7 @@ def run_full_pipeline_batch(
         len(tokenizer(p, add_special_tokens=False).input_ids) > 50 for p in prompts
     )
     max_tokens = 2400 if seg_needed else 1200
+    default_seg_chars = [",", ".", "?", "!"]
 
     msgs: list[str] = []
     html_blocks: dict[str, list[str]] = {
@@ -1001,13 +1006,13 @@ def run_full_pipeline_batch(
                 path = generate_audio(
                     text,
                     ds_name,
-                    temperature=0.6,
-                    top_p=0.95,
-                    repetition_penalty=1.1,
+                    temperature=temperature,
+                    top_p=top_p,
+                    repetition_penalty=repetition_penalty,
                     max_new_tokens=max_tokens,
                     segment=True,
                     segment_by="sentence",
-                    seg_chars=[",", ".", "?", "!"],
+                    seg_chars=default_seg_chars,
                     seg_min_tokens=0,
                     seg_max_tokens=50,
                     seg_gap=0.0,
@@ -1017,9 +1022,9 @@ def run_full_pipeline_batch(
                 path = generate_audio(
                     text,
                     ds_name,
-                    temperature=0.6,
-                    top_p=0.95,
-                    repetition_penalty=1.1,
+                    temperature=temperature,
+                    top_p=top_p,
+                    repetition_penalty=repetition_penalty,
                     max_new_tokens=max_tokens,
                     segment=False,
                     fade_ms=fade_ms,
@@ -1082,19 +1087,36 @@ with gr.Blocks(css=CSS) as demo:
 
     with gr.Tabs():
         with gr.Tab("Unified"):
-            auto_dataset = gr.Dropdown(choices=list_source_audio(), label="Dataset", multiselect=True)
-            auto_prompt = gr.Textbox(label="Prompt")
-            auto_batch = gr.Slider(1, 5, step=1, value=1, label="Batch")
-            auto_prompt_file = gr.Dropdown(choices=[""] + prompt_files, label="Prompt List")
-            auto_btn = gr.Button("Run Pipeline")
             with gr.Row():
-                auto_log = gr.Textbox(scale=1)
-                auto_counter = gr.Textbox(scale=1)
-            auto_output = gr.HTML(visible=False)
+                with gr.Column(scale=65):
+                    auto_dataset = gr.Dropdown(choices=list_source_audio(), label="Dataset", multiselect=True)
+                    auto_prompt = gr.Textbox(label="Prompt")
+                    auto_batch = gr.Slider(1, 5, step=1, value=1, label="Batch")
+                    auto_prompt_file = gr.Dropdown(choices=[""] + prompt_files, label="Prompt List")
+                    auto_btn = gr.Button("Run Pipeline")
+                    with gr.Row():
+                        auto_log = gr.Textbox(scale=1)
+                        auto_counter = gr.Textbox(scale=1)
+                    auto_output = gr.HTML(visible=False)
+                with gr.Column(scale=35):
+                    with gr.Accordion("Advanced Settings", open=False):
+                        adv_temperature = gr.Slider(0.1, 1.0, value=0.6, step=0.05, label="Temperature")
+                        adv_top_p = gr.Slider(0.5, 1.0, value=0.95, step=0.05, label="Top-p")
+                        adv_repeat = gr.Slider(1.0, 2.0, value=1.1, step=0.05, label="Repetition Penalty")
+                        adv_fade_ms = gr.Slider(0, 1000, value=60, step=10, label="Crossfade (ms)")
 
             auto_btn.click(
                 run_full_pipeline_batch,
-                [auto_dataset, auto_prompt, auto_prompt_file, auto_batch],
+                [
+                    auto_dataset,
+                    auto_prompt,
+                    auto_prompt_file,
+                    auto_batch,
+                    adv_temperature,
+                    adv_top_p,
+                    adv_repeat,
+                    adv_fade_ms,
+                ],
                 [auto_log, auto_counter, auto_output],
             )
 
