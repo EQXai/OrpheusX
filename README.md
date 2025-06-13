@@ -33,9 +33,13 @@ Activate venv::
 source venv/bin/activate
 ```
 
+Everything else (installation, dataset creation, training, inference) is handled interactively through the CLI.
+
 To start:
 
 ## 🌐 Gradio Interface
+
+If you prefer a simple web UI instead of the CLI, run:
 
 ```bash
 python gradio_app.py
@@ -51,10 +55,8 @@ python gradio_app.py
 #  Output Directory:
 
 - The output of the processed audio files can be found in: `scripts/audio_output/`
-
   
 ---
-
 
 ## 🧩 Features
 
@@ -82,9 +84,8 @@ All features are available via an interactive command-line menu.
 ---
 
 The script will ask which port you want to use before launching.
-The web UI lets you prepare datasets, train LoRAs and run inference.
-Training and inference tabs include dropdowns listing local datasets or
-available LoRA models and can also load prompt lists from `prompt_list/`.
+The web UI provides an Auto Pipeline tab that can prepare a dataset,
+train a LoRA and run inference in one step.
 
 The "Max New Tokens" setting defaults to 1200. The model has a 2048 token
 context limit, so the sum of prompt tokens and new tokens should not exceed
@@ -114,9 +115,6 @@ segmentation (comma, period, question mark and exclamation point) and specify a
 minimum and maximum token count for each segment. The limits are ignored when
 `full_segment` is selected.
 
-There is also a **Full Segment Test** tab in the web UI. This simplified
-interface exposes only character-based segmentation so you can verify how the
-`full_segment` mode splits prompts without any token settings.
 
 While generating audio, the CLI prints a segmentation log showing where each
 chunk starts and ends. After all segments are generated they are automatically
