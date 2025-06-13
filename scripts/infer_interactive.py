@@ -338,7 +338,13 @@ def main():
                 f"Inference time: {elapsed:.2f}s ({rate:.2f}s per generated second)"
             )
             path = get_output_path(lora_choice or "base_model")
-            torchaudio.save(path, final_audio.detach().cpu(), 24000)
+            torchaudio.save(
+                path,
+                final_audio.detach().cpu(),
+                24000,
+                encoding="PCM_S",
+                bits_per_sample=16,
+            )
             print(f"Audio written to {path}")
             torch.cuda.empty_cache()
             gc.collect()
