@@ -14,6 +14,7 @@ from pathlib import Path
 import json
 import re
 import base64
+import typing
 import unsloth  # must be imported before transformers
 from transformers import AutoTokenizer
 import gradio as gr
@@ -820,7 +821,9 @@ def dataset_status(name: str) -> str:
     """Return model status message for a dataset."""
     ds_name = Path(name).stem
     lora_path = LORA_DIR / ds_name / "lora_model"
-    return "Model already created" if lora_path.is_dir() else ""
+    if lora_path.is_dir():
+        return "Model already created"
+    return "Model not created"
 
 
 def dataset_status_multi(names: list[str]) -> str:
@@ -829,7 +832,10 @@ def dataset_status_multi(names: list[str]) -> str:
     for name in names:
         ds_name = Path(name).stem
         lora_path = LORA_DIR / ds_name / "lora_model"
-        status = "Model already created" if lora_path.is_dir() else ""
+        if lora_path.is_dir():
+            status = "Model already created"
+        else:
+            status = "Model not created"
         msgs.append(f"{ds_name}: {status}")
     return "<br>".join(msgs)
 
@@ -898,74 +904,137 @@ def run_full_pipeline_batch(
     prompt_file: str | None,
     batch: int,
     fade_ms: int = 60,
-) -> tuple[str, str]:
-    """Run the full pipeline for multiple datasets and prompts."""
+) -> typing.Generator[tuple[str, str, str], None, None]:
+    """Run the full pipeline for multiple datasets and prompts with live counter."""
     global STOP_FLAG
     if not dataset_files:
-        return "No dataset selected", ""
+        yield "No dataset selected", "", ""
+        return
     if prompt_file:
         prompts = load_prompts(prompt_file)
         if not prompts:
-            return "Prompt list is empty", ""
+            yield "Prompt list is empty", "", ""
+            return
     else:
         if not prompt:
-            return "Prompt is empty", ""
+            yield "Prompt is empty", "", ""
+            return
         prompts = [prompt] * max(1, int(batch or 1))
-    msgs: list[str] = []
-    html_blocks: list[str] = []
-    total = len(dataset_files)
-    progress = gr.Progress()
+
     tokenizer = get_pipeline_tokenizer()
     seg_needed = any(
         len(tokenizer(p, add_special_tokens=False).input_ids) > 50 for p in prompts
     )
     max_tokens = 2400 if seg_needed else 1200
-    for idx, dataset_file in enumerate(dataset_files, 1):
+
+    msgs: list[str] = []
+    html_blocks: list[str] = []
+    counters: dict[str, int] = {Path(d).stem: 0 for d in dataset_files}
+    total_per_ds = len(prompts)
+
+    def fmt_counters() -> str:
+        return "\n".join(
+            f"Inferencia de {name}: {counters[name]}/{total_per_ds}" for name in counters
+        )
+
+    progress = gr.Progress()
+    total_steps = len(dataset_files) * (len(prompts) + 2)
+    step = 0
+
+    # Initial counter display
+    yield "", fmt_counters(), ""
+
+    for dataset_file in dataset_files:
         if STOP_FLAG:
             STOP_FLAG = False
-            return "Stopped", ""
+            yield "Stopped", fmt_counters(), "<hr/>".join(html_blocks)
+            return
         ds_name = Path(dataset_file).stem
         audio_path = SOURCE_AUDIO_DIR / dataset_file
         dataset_dir = DATASETS_DIR / ds_name
         lora_dir = LORA_DIR / ds_name / "lora_model"
-        base_progress = (idx - 1) / total
+
+        progress(step / total_steps, desc=f"Preparing {ds_name}")
         if not dataset_dir.is_dir():
-            progress(base_progress, desc=f"Preparing {ds_name}")
             prepare_dataset(str(audio_path), str(dataset_dir))
             msgs.append(f"{ds_name}: dataset prepared")
         else:
             msgs.append(f"{ds_name}: dataset already prepared")
+        step += 1
+        yield "\n".join(msgs), fmt_counters(), "<hr/>".join(html_blocks)
         if STOP_FLAG:
             STOP_FLAG = False
-            return "Stopped", ""
+            yield "Stopped", fmt_counters(), "<hr/>".join(html_blocks)
+            return
+
+        progress(step / total_steps, desc=f"Training {ds_name}")
         if not lora_dir.is_dir():
-            progress(base_progress + 0.33 / total, desc=f"Training {ds_name}")
             train_lora_single(str(dataset_dir), ds_name, True)
             msgs.append(f"{ds_name}: LoRA trained")
         else:
             msgs.append(f"{ds_name}: LoRA already trained")
+        step += 1
+        yield "\n".join(msgs), fmt_counters(), "<hr/>".join(html_blocks)
         if STOP_FLAG:
             STOP_FLAG = False
-            return "Stopped", ""
-        progress(base_progress + 0.66 / total, desc=f"Generating {ds_name}")
-        html, _ = generate_batch(
-            prompts,
-            [ds_name],
-            temperature=0.6,
-            top_p=0.95,
-            repetition_penalty=1.1,
-            max_new_tokens=max_tokens,
-            segment=seg_needed,
-            segment_by="sentence",
-            seg_chars=[",", ".", "?", "!"] if seg_needed else None,
-            seg_min_tokens=0,
-            seg_max_tokens=50,
-            seg_gap=0.0,
-            fade_ms=fade_ms,
-        )
-        html_blocks.append(html)
+            yield "Stopped", fmt_counters(), "<hr/>".join(html_blocks)
+            return
+
+        for text in prompts:
+            progress(step / total_steps, desc=f"Generating {ds_name}")
+            if seg_needed:
+                path = generate_audio(
+                    text,
+                    ds_name,
+                    temperature=0.6,
+                    top_p=0.95,
+                    repetition_penalty=1.1,
+                    max_new_tokens=max_tokens,
+                    segment=True,
+                    segment_by="sentence",
+                    seg_chars=[",", ".", "?", "!"],
+                    seg_min_tokens=0,
+                    seg_max_tokens=50,
+                    seg_gap=0.0,
+                    fade_ms=fade_ms,
+                )
+            else:
+                path = generate_audio(
+                    text,
+                    ds_name,
+                    temperature=0.6,
+                    top_p=0.95,
+                    repetition_penalty=1.1,
+                    max_new_tokens=max_tokens,
+                    segment=False,
+                    fade_ms=fade_ms,
+                )
+            try:
+                with open(path, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("ascii")
+                src = f"data:audio/wav;base64,{b64}"
+            except Exception:
+                logger.exception("Failed to read %s", path)
+                src = ""
+            html_blocks.append(
+                "".join(
+                    [
+                        "<div style='margin-bottom:1em'>",
+                        f"<p>{ds_name}: {text[:60]}</p>",
+                        f"<audio controls src='{src}'></audio>",
+                        "</div>",
+                    ]
+                )
+            )
+            counters[ds_name] += 1
+            step += 1
+            yield "\n".join(msgs), fmt_counters(), "<hr/>".join(html_blocks)
+            if STOP_FLAG:
+                STOP_FLAG = False
+                yield "Stopped", fmt_counters(), "<hr/>".join(html_blocks)
+                return
     progress(1, desc="Done")
-    return "\n".join(msgs), "<hr/>".join(html_blocks)
+    yield "\n".join(msgs), fmt_counters(), "<hr/>".join(html_blocks)
 
 
 # ---- Gradio Interface ----
@@ -998,14 +1067,16 @@ with gr.Blocks() as demo:
                     auto_batch = gr.Slider(1, 5, step=1, value=1, label="Batch")
                     auto_prompt_file = gr.Dropdown(choices=[""] + prompt_files, label="Prompt List")
                     auto_btn = gr.Button("Run Pipeline")
-                    auto_log = gr.Textbox()
+                    with gr.Row():
+                        auto_log = gr.Textbox(scale=1)
+                        auto_counter = gr.Textbox(scale=1)
                     auto_output = gr.HTML()
 
                     auto_dataset.change(dataset_status_multi, auto_dataset, auto_status)
                     auto_btn.click(
                         run_full_pipeline_batch,
                         [auto_dataset, auto_prompt, auto_prompt_file, auto_batch],
-                        [auto_log, auto_output],
+                        [auto_log, auto_counter, auto_output],
                     )
 
     refresh_btn.click(
