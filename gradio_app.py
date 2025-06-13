@@ -933,8 +933,9 @@ def run_full_pipeline_batch(
     total_per_ds = len(prompts)
 
     def fmt_counters() -> str:
+        """Return progress for each dataset as ``Model: current/total`` lines."""
         return "\n".join(
-            f"Inferencia de {name}: {counters[name]}/{total_per_ds}" for name in counters
+            f"{name}: {counters[name]}/{total_per_ds}" for name in counters
         )
 
     progress = gr.Progress()
