@@ -13,6 +13,7 @@ import signal
 from pathlib import Path
 import json
 import re
+import base64
 import unsloth  # must be imported before transformers
 from transformers import AutoTokenizer
 import gradio as gr
@@ -730,7 +731,13 @@ def generate_audio(
     lora_name = lora_name or "base_model"
     path = get_output_path(lora_name)
     import torchaudio
-    torchaudio.save(str(path), final_audio.detach().cpu(), 24000)
+    torchaudio.save(
+        str(path),
+        final_audio.detach().cpu(),
+        24000,
+        encoding="PCM_S",
+        bits_per_sample=16,
+    )
     torch.cuda.empty_cache()
     gc.collect()
     logger.info("Saved audio to %s", path)
@@ -793,10 +800,17 @@ def generate_batch(
     progress(1)
     html_items = []
     for path, caption in results:
+        try:
+            with open(path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("ascii")
+            src = f"data:audio/wav;base64,{b64}"
+        except Exception:
+            logger.exception("Failed to read %s", path)
+            src = ""
         html_items.append(
             f"<div style='margin-bottom:1em'>"
             f"<p>{caption}</p>"
-            f"<audio controls src='file={path}'></audio>"
+            f"<audio controls src='{src}'></audio>"
             f"</div>"
         )
     return "\n".join(html_items), last_path
