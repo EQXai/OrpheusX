@@ -927,11 +927,10 @@ def run_full_pipeline_batch(
             return
         prompts = [prompt] * max(1, int(batch or 1))
 
-    tokenizer = get_pipeline_tokenizer()
-    seg_needed = any(
-        len(tokenizer(p, add_special_tokens=False).input_ids) > 50 for p in prompts
-    )
-    max_tokens = 2400 if seg_needed else 1200
+    if isinstance(seg_chars, str):
+        seg_chars = [c.strip() for c in seg_chars.split() if c.strip()]
+
+    max_tokens = max_new_tokens
 
     msgs: list[str] = []
     html_blocks: dict[str, list[str]] = {
@@ -1027,6 +1026,7 @@ def run_full_pipeline_batch(
                     segment=False,
                     fade_ms=fade_ms,
                 )
+
             try:
                 with open(path, "rb") as f:
                     b64 = base64.b64encode(f.read()).decode("ascii")
