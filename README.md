@@ -1,11 +1,11 @@
 # 🚀 OrpheusX – Speech-to-Speech Fine-Tuning Toolkit
 
-Orpheusx is a Wrapped of OrpheusTTS and WhisperX.
-Includes a Gradio interface that executes all in one: 
-Dataset preparation
-Tokenizacion
-Training
-Inference
+- Orpheusx is a Wrapped of OrpheusTTS and WhisperX.
+- Includes a Gradio interface that executes all in one: 
+- Dataset preparation
+- Tokenizacion
+- Training
+- Inference
 
 ---
 
