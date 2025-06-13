@@ -1083,4 +1083,4 @@ with gr.Blocks() as demo:
     stop_btn.click(stop_current, None, None)
     exit_btn.click(exit_app, None, None)
 if __name__ == "__main__":
-    demo.launch(server_port=18188)
+    demo.queue().launch(server_port=18188)
