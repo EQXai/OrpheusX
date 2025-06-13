@@ -147,7 +147,8 @@ from unsloth import FastLanguageModel, is_bfloat16_supported
 import torchaudio.transforms as T
 from snac import SNAC
 import torch
-from transformers import TrainingArguments, Trainer
+from transformers import TrainingArguments, Trainer, TrainerCallback
+from typing import Callable, Optional
 
 MODEL_NAME = os.environ.get("MODEL_NAME", "unsloth/orpheus-3b-0.1-ft")
 CACHE_DIR = REPO_ROOT / "models"
@@ -167,6 +168,9 @@ def train_lora_single(
     weight_decay: float = 0.01,
     optim: str = "adamw_8bit",
     scheduler: str = "linear",
+    progress: Optional[Callable[[float, str], None]] = None,
+    progress_base: float = 0.0,
+    progress_range: float = 1.0,
 ) -> str:
     """Train a single LoRA on a dataset."""
     logger.info("Training LoRA %s from %s", lora_name, dataset_source)
@@ -321,6 +325,24 @@ def train_lora_single(
             report_to="none",
         ),
     )
+
+    total_steps = max_steps
+    if progress is not None:
+        class TrainingProgressCallback(TrainerCallback):
+            def __init__(self):
+                self.step = 0
+
+            def on_step_end(self, args, state, control, **kwargs):
+                self.step = state.global_step
+                frac = progress_base + progress_range * (self.step / total_steps)
+                percent = int(100 * self.step / total_steps)
+                progress(frac, desc=f"Training LoRA — step {self.step}/{total_steps} — {percent}%")
+
+            def on_train_end(self, args, state, control, **kwargs):
+                progress(progress_base + progress_range, desc=f"Training LoRA — step {total_steps}/{total_steps} ✔")
+
+        progress(progress_base, desc=f"Training LoRA — step 0/{total_steps} — 0%")
+        trainer.add_callback(TrainingProgressCallback())
 
     trainer.train()
 
@@ -664,6 +686,9 @@ def generate_audio(
     seg_max_tokens: int = 50,
     seg_gap: float = 0.0,
     fade_ms: int = 60,
+    progress: Optional[Callable[[float, str], None]] = None,
+    progress_base: float = 0.0,
+    progress_range: float = 1.0,
 ) -> str:
     model_name = MODEL_NAME
     lora_path = None
@@ -708,8 +733,13 @@ def generate_audio(
         single = tokenizer(text, return_tensors='pt').input_ids.squeeze(0)
         logger.info("Single segment tokens: %d", single.numel())
         segments = [single]
+    total_segments = len(segments)
     final_audio = None
-    for s in segments:
+    for idx, s in enumerate(segments, 1):
+        if progress is not None:
+            frac = progress_base + progress_range * (idx - 1) / total_segments
+            percent = int(100 * (idx - 1) / total_segments)
+            progress(frac, desc=f"Generating audio — segment {idx}/{total_segments} — {percent}%")
         part = generate_audio_segment(
             s, model, snac_model, max_new_tokens=max_new_tokens
         )
@@ -734,6 +764,12 @@ def generate_audio(
     torch.cuda.empty_cache()
     gc.collect()
     logger.info("Saved audio to %s", path)
+    if progress is not None:
+        desc = f"Generating audio — segment {total_segments}/{total_segments} ✔"
+        if abs(progress_base + progress_range - 1.0) < 1e-6:
+            progress(1, desc=desc + "  (Done)")
+        else:
+            progress(progress_base + progress_range, desc=desc)
     return str(path)
 
 
@@ -751,6 +787,9 @@ def generate_batch(
     seg_max_tokens: int,
     seg_gap: float = 0.0,
     fade_ms: int = 60,
+    progress: Optional[Callable[[float, str], None]] = None,
+    progress_base: float = 0.0,
+    progress_range: float = 1.0,
 ) -> tuple[str, str]:
     """Generate audio for multiple prompts/LORAs."""
     global STOP_FLAG
@@ -761,13 +800,21 @@ def generate_batch(
     last_path = ""
     total = len(prompts) * len(loras)
     step = 0
-    progress = gr.Progress()
+    local_progress = None
+    if progress is None:
+        local_progress = gr.Progress()
+        progress_fn = local_progress
+    else:
+        progress_fn = progress
     for lora in loras:
         for text in prompts:
             if STOP_FLAG:
                 STOP_FLAG = False
                 return "", ""
-            progress(step / total, desc=f"Generating {lora or 'base'}...")
+            if progress_fn is not None:
+                frac = progress_base + progress_range * (step / total)
+                percent = int(100 * step / total)
+                progress_fn(frac, desc=f"Generating audio — segment {step+1}/{total} — {percent}%")
             logger.info("Generating prompt '%s' with lora '%s'", text, lora or 'base_model')
             path = generate_audio(
                 text,
@@ -783,6 +830,9 @@ def generate_batch(
                 seg_max_tokens,
                 seg_gap,
                 fade_ms,
+                progress_fn,
+                progress_base + progress_range * (step / total),
+                progress_range / total,
             )
             torch.cuda.empty_cache()
             gc.collect()
@@ -790,7 +840,8 @@ def generate_batch(
             results.append((path, caption))
             last_path = path
             step += 1
-    progress(1)
+    if progress_fn is not None:
+        progress_fn(progress_base + progress_range, desc=f"Generating audio — segment {total}/{total} ✔")
     html_items = []
     for path, caption in results:
         html_items.append(
@@ -837,24 +888,32 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tupl
         STOP_FLAG = False
         return "Stopped", ""
     if not dataset_dir.is_dir():
-        progress(0.0, desc="Preparing dataset")
+        progress(0.0, desc="Preparing dataset (0/1) — 0%")
         prepare_dataset(str(audio_path), str(dataset_dir))
+        progress(0.3, desc="Preparing dataset (1/1) — 100% ✔")
         msgs.append("Dataset prepared")
     else:
+        progress(0.3, desc="Preparing dataset (1/1) — 100% ✔")
         msgs.append("Dataset already prepared")
     if STOP_FLAG:
         STOP_FLAG = False
         return "Stopped", ""
     if not lora_dir.is_dir():
-        progress(0.33, desc="Training LoRA")
-        train_lora_single(str(dataset_dir), ds_name, True)
+        train_lora_single(
+            str(dataset_dir),
+            ds_name,
+            True,
+            progress=progress,
+            progress_base=0.3,
+            progress_range=0.5,
+        )
         msgs.append("LoRA trained")
     else:
+        progress(0.8, desc="Training LoRA — step 1/1 — 100% ✔")
         msgs.append("LoRA already trained")
     tokenizer = get_pipeline_tokenizer()
     token_len = len(tokenizer(prompt, add_special_tokens=False).input_ids)
     use_segmentation = token_len > 50
-    progress(0.66, desc="Generating audio")
     if STOP_FLAG:
         STOP_FLAG = False
         return "Stopped", ""
@@ -870,10 +929,19 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tupl
             seg_max_tokens=50,
             seg_gap=0.0,
             fade_ms=fade_ms,
+            progress=progress,
+            progress_base=0.8,
+            progress_range=0.2,
         )
     else:
-        out_path = generate_audio(prompt, ds_name, fade_ms=fade_ms)
-    progress(1, desc="Done")
+        out_path = generate_audio(
+            prompt,
+            ds_name,
+            fade_ms=fade_ms,
+            progress=progress,
+            progress_base=0.8,
+            progress_range=0.2,
+        )
     msgs.append(f"Audio saved to {out_path}")
     return "\n".join(msgs), out_path
 
@@ -915,25 +983,36 @@ def run_full_pipeline_batch(
         dataset_dir = DATASETS_DIR / ds_name
         lora_dir = LORA_DIR / ds_name / "lora_model"
         base_progress = (idx - 1) / total
+        prep_range = 0.3 / total
+        train_range = 0.5 / total
+        gen_range = 0.2 / total
         if not dataset_dir.is_dir():
-            progress(base_progress, desc=f"Preparing {ds_name}")
+            progress(base_progress, desc=f"Preparing dataset ({idx}/{total}) — {int(100 * (idx - 1)/total)}%")
             prepare_dataset(str(audio_path), str(dataset_dir))
+            progress(base_progress + prep_range, desc=f"Preparing dataset ({idx}/{total}) — 100% ✔")
             msgs.append(f"{ds_name}: dataset prepared")
         else:
+            progress(base_progress + prep_range, desc=f"Preparing dataset ({idx}/{total}) — 100% ✔")
             msgs.append(f"{ds_name}: dataset already prepared")
         if STOP_FLAG:
             STOP_FLAG = False
             return "Stopped", ""
         if not lora_dir.is_dir():
-            progress(base_progress + 0.33 / total, desc=f"Training {ds_name}")
-            train_lora_single(str(dataset_dir), ds_name, True)
+            train_lora_single(
+                str(dataset_dir),
+                ds_name,
+                True,
+                progress=progress,
+                progress_base=base_progress + prep_range,
+                progress_range=train_range,
+            )
             msgs.append(f"{ds_name}: LoRA trained")
         else:
+            progress(base_progress + prep_range + train_range, desc="Training LoRA — step 1/1 — 100% ✔")
             msgs.append(f"{ds_name}: LoRA already trained")
         if STOP_FLAG:
             STOP_FLAG = False
             return "Stopped", ""
-        progress(base_progress + 0.66 / total, desc=f"Generating {ds_name}")
         html, _ = generate_batch(
             prompts,
             [ds_name],
@@ -948,9 +1027,11 @@ def run_full_pipeline_batch(
             seg_max_tokens=50,
             seg_gap=0.0,
             fade_ms=fade_ms,
+            progress=progress,
+            progress_base=base_progress + prep_range + train_range,
+            progress_range=gen_range,
         )
         html_blocks.append(html)
-    progress(1, desc="Done")
     return "\n".join(msgs), "<hr/>".join(html_blocks)
 
 
