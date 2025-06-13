@@ -1029,6 +1029,7 @@ def run_full_pipeline_batch(
                     segment=False,
                     fade_ms=fade_ms,
                 )
+
             try:
                 with open(path, "rb") as f:
                     b64 = base64.b64encode(f.read()).decode("ascii")
