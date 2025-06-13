@@ -45,11 +45,6 @@ If you prefer a simple web UI instead of the CLI, run:
 python gradio_app.py
 ```
 
-## 🌐 Terminal CLI
-
-```bash
-python scripts/orpheus_cli.py
-```
 
 # 📁 Where to place the audio dataset:
 
@@ -60,8 +55,10 @@ python scripts/orpheus_cli.py
 #  Output Directory:
 
 - The output of the processed audio files can be found in: `scripts/audio_output/`
+
   
 ---
+
 
 ## 🧩 Features
 
