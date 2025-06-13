@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import List, Tuple
 
 import torch
-import gradio as gr
 from transformers import AutoTokenizer
 from peft import PeftModel
 from unsloth import FastLanguageModel
@@ -338,13 +337,11 @@ def generate_batch(
     last_path = ""
     total = len(prompts) * len(loras)
     step = 0
-    progress = gr.Progress()
     for lora in loras:
         for text in prompts:
             if _c.STOP_FLAG:
                 _c.STOP_FLAG = False
                 return "", ""
-            progress(step / total, desc=f"Generating {lora or 'base'}...")
             logger.info("Generating prompt '%s' with lora '%s'", text, lora or 'base_model')
             path = generate_audio(
                 text,
@@ -367,8 +364,6 @@ def generate_batch(
             results.append((path, caption))
             last_path = path
             step += 1
-    progress(1)
-
     html_items = [
         f"<div style='margin-bottom:1em'><p>{caption}</p><audio controls src='file={path}'></audio></div>"
         for path, caption in results

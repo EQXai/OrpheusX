@@ -54,14 +54,12 @@ def build_ui() -> gr.Blocks:
                             choices=prompt_files, label="Prompt List"
                         )
                         auto_btn = gr.Button("Run Pipeline")
-                        auto_log = gr.Textbox()
-                        auto_output = gr.HTML()
 
                         auto_dataset.change(dataset_status_multi, auto_dataset, auto_status)
                         auto_btn.click(
                             run_full_pipeline_batch,
                             [auto_dataset, auto_prompt, auto_prompt_file, auto_batch],
-                            [auto_log, auto_output],
+                            None,
                         )
 
         # Header buttons

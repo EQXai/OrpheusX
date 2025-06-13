@@ -98,13 +98,11 @@ def prepare_datasets_ui(
     msgs: list[str] = []
     logger.info("Preparing %d dataset(s)", len(tasks))
     total = len(tasks)
-    progress = gr.Progress()
     for idx, (audio_path, ds_name) in enumerate(tasks, start=1):
         if _c.STOP_FLAG:
             _c.STOP_FLAG = False
             return "Stopped"
         start = time.perf_counter()
-        progress((idx - 1) / total, desc=f"Preparing {ds_name}...")
         out_dir = DATASETS_DIR / ds_name
         out_dir.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -121,7 +119,7 @@ def prepare_datasets_ui(
             elapsed = time.perf_counter() - start
             logger.exception("Error preparing %s after %.2fs", ds_name, elapsed)
             msgs.append(f"{ds_name}: failed ({e})")
-        progress(idx / total)
+
     return "\n".join(msgs)
 
 # -----------------------------------------------------------------------------

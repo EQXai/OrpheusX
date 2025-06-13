@@ -4,7 +4,6 @@ import time
 import os
 from pathlib import Path
 
-import gradio as gr
 import torch
 from datasets import load_dataset, load_from_disk
 from transformers import TrainingArguments, Trainer
@@ -262,12 +261,10 @@ def train_loras(
     msgs: list[str] = []
     total = len(dataset_info)
     logger.info("Training %d LoRA(s)", total)
-    progress = gr.Progress()
     for idx, (src, name, is_local) in enumerate(dataset_info, start=1):
         if _c.STOP_FLAG:
             _c.STOP_FLAG = False
             return "Stopped"
-        progress((idx - 1) / total, desc=f"Training {name}...")
         start = time.perf_counter()
         try:
             _ = train_lora_single(
@@ -292,7 +289,6 @@ def train_loras(
             elapsed = time.perf_counter() - start
             logger.exception("Training failed for %s after %.2fs", name, elapsed)
             msgs.append(f"{name}: failed ({exc})")
-    progress(1)
     return "\n".join(msgs)
 
 __all__ = [

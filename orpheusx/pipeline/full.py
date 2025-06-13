@@ -3,7 +3,6 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-import gradio as gr
 
 from tools.logger_utils import get_logger
 from scripts.prepare_dataset import prepare_dataset
@@ -60,7 +59,6 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60):
     dataset_dir = DATASETS_DIR / ds_name
     lora_dir = LORA_DIR / ds_name / "lora_model"
 
-    progress = gr.Progress()
     msgs: list[str] = []
 
     if _c.STOP_FLAG:
@@ -68,7 +66,6 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60):
         return "Stopped", ""
 
     if not dataset_dir.is_dir():
-        progress(0.0, desc="Preparing dataset")
         prepare_dataset(str(audio_path), str(dataset_dir))
         msgs.append("Dataset prepared")
     else:
@@ -79,7 +76,6 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60):
         return "Stopped", ""
 
     if not lora_dir.is_dir():
-        progress(0.33, desc="Training LoRA")
         train_lora_single(str(dataset_dir), ds_name, True)
         msgs.append("LoRA trained")
     else:
@@ -89,7 +85,6 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60):
     token_len = len(tokenizer(prompt, add_special_tokens=False).input_ids)
     use_segmentation = token_len > 50
 
-    progress(0.66, desc="Generating audio")
     if _c.STOP_FLAG:
         _c.STOP_FLAG = False
         return "Stopped", ""
@@ -109,7 +104,6 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60):
     else:
         out_path = generate_audio(prompt, ds_name, fade_ms=fade_ms)
 
-    progress(1, desc="Done")
     msgs.append(f"Audio saved to {out_path}")
     return "\n".join(msgs), out_path
 
@@ -142,7 +136,6 @@ def run_full_pipeline_batch(
     msgs: list[str] = []
     html_blocks: list[str] = []
     total = len(dataset_files)
-    progress = gr.Progress()
 
     tokenizer = get_pipeline_tokenizer()
     seg_needed = any(len(tokenizer(p, add_special_tokens=False).input_ids) > 50 for p in prompts)
@@ -161,7 +154,6 @@ def run_full_pipeline_batch(
         base_progress = (idx - 1) / total
 
         if not dataset_dir.is_dir():
-            progress(base_progress, desc=f"Preparing {ds_name}")
             prepare_dataset(str(audio_path), str(dataset_dir))
             msgs.append(f"{ds_name}: dataset prepared")
         else:
@@ -172,7 +164,6 @@ def run_full_pipeline_batch(
             return "Stopped", ""
 
         if not lora_dir.is_dir():
-            progress(base_progress + 0.33 / total, desc=f"Training {ds_name}")
             train_lora_single(str(dataset_dir), ds_name, True)
             msgs.append(f"{ds_name}: LoRA trained")
         else:
@@ -182,7 +173,6 @@ def run_full_pipeline_batch(
             _c.STOP_FLAG = False
             return "Stopped", ""
 
-        progress(base_progress + 0.66 / total, desc=f"Generating {ds_name}")
         html, _ = generate_batch(
             prompts,
             [ds_name],
@@ -200,7 +190,6 @@ def run_full_pipeline_batch(
         )
         html_blocks.append(html)
 
-    progress(1, desc="Done")
     return "\n".join(msgs), "<hr/>".join(html_blocks)
 
 __all__ = [
