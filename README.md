@@ -1,6 +1,11 @@
 # 🚀 OrpheusX – Speech-to-Speech Fine-Tuning Toolkit
 
-OrpheusX is a powerful tool for creating, training, and running custom text-to-speech (TTS). It includes an interactive Gradio to guide you through every step.
+Orpheusx is a Wrapped of OrpheusTTS and WhisperX.
+Includes a Gradio interface that executes all in one: 
+Dataset preparation
+Tokenizacion
+Training
+Inference
 
 ---
 
