@@ -13,6 +13,8 @@ import signal
 from pathlib import Path
 import json
 import re
+import base64
+import typing
 import unsloth  # must be imported before transformers
 from transformers import AutoTokenizer
 import gradio as gr
@@ -730,7 +732,13 @@ def generate_audio(
     lora_name = lora_name or "base_model"
     path = get_output_path(lora_name)
     import torchaudio
-    torchaudio.save(str(path), final_audio.detach().cpu(), 24000)
+    torchaudio.save(
+        str(path),
+        final_audio.detach().cpu(),
+        24000,
+        encoding="PCM_S",
+        bits_per_sample=16,
+    )
     torch.cuda.empty_cache()
     gc.collect()
     logger.info("Saved audio to %s", path)
@@ -793,31 +801,46 @@ def generate_batch(
     progress(1)
     html_items = []
     for path, caption in results:
+        try:
+            with open(path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("ascii")
+            src = f"data:audio/wav;base64,{b64}"
+        except Exception:
+            logger.exception("Failed to read %s", path)
+            src = ""
         html_items.append(
             f"<div style='margin-bottom:1em'>"
             f"<p>{caption}</p>"
-            f"<audio controls src='file={path}'></audio>"
+            f"<audio controls src='{src}'></audio>"
             f"</div>"
         )
     return "\n".join(html_items), last_path
+
 
 
 def dataset_status(name: str) -> str:
     """Return model status message for a dataset."""
     ds_name = Path(name).stem
     lora_path = LORA_DIR / ds_name / "lora_model"
-    return "Model already created" if lora_path.is_dir() else ""
+    if lora_path.is_dir():
+        return "Model already created"
+    return "Model not created"
 
 
-def dataset_status_multi(names: list[str]) -> str:
-    """Return status for multiple datasets."""
+def dataset_status_multi(names: typing.Any) -> str:
+    """Return status for one or more datasets."""
+    if not names:
+        return ""
+    if isinstance(names, str):
+        names = [names]
     msgs: list[str] = []
     for name in names:
-        ds_name = Path(name).stem
+        ds_name = Path(str(name)).stem
         lora_path = LORA_DIR / ds_name / "lora_model"
-        status = "Model already created" if lora_path.is_dir() else ""
+        status = "Model already created" if lora_path.is_dir() else "Model not created"
         msgs.append(f"{ds_name}: {status}")
-    return "\n".join(msgs)
+    return "<br>".join(msgs)
+
 
 
 def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tuple[str, str]:
@@ -854,6 +877,7 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tupl
     tokenizer = get_pipeline_tokenizer()
     token_len = len(tokenizer(prompt, add_special_tokens=False).input_ids)
     use_segmentation = token_len > 50
+    default_seg_chars = [",", ".", "?", "!"]
     progress(0.66, desc="Generating audio")
     if STOP_FLAG:
         STOP_FLAG = False
@@ -865,7 +889,7 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tupl
             max_new_tokens=2400,
             segment=True,
             segment_by="sentence",
-            seg_chars=[",", ".", "?", "!"],
+            seg_chars=default_seg_chars,
             seg_min_tokens=0,
             seg_max_tokens=50,
             seg_gap=0.0,
@@ -883,75 +907,155 @@ def run_full_pipeline_batch(
     prompt: str,
     prompt_file: str | None,
     batch: int,
+    temperature: float = 0.6,
+    top_p: float = 0.95,
+    repetition_penalty: float = 1.1,
     fade_ms: int = 60,
-) -> tuple[str, str]:
-    """Run the full pipeline for multiple datasets and prompts."""
+) -> typing.Generator[tuple[str, str, str], None, None]:
+    """Run the full pipeline for multiple datasets and prompts with live counter."""
     global STOP_FLAG
     if not dataset_files:
-        return "No dataset selected", ""
+        yield "No dataset selected", "", ""
+        return
     if prompt_file:
         prompts = load_prompts(prompt_file)
         if not prompts:
-            return "Prompt list is empty", ""
+            yield "Prompt list is empty", "", ""
+            return
     else:
         if not prompt:
-            return "Prompt is empty", ""
+            yield "Prompt is empty", "", ""
+            return
         prompts = [prompt] * max(1, int(batch or 1))
-    msgs: list[str] = []
-    html_blocks: list[str] = []
-    total = len(dataset_files)
-    progress = gr.Progress()
+
     tokenizer = get_pipeline_tokenizer()
     seg_needed = any(
         len(tokenizer(p, add_special_tokens=False).input_ids) > 50 for p in prompts
     )
     max_tokens = 2400 if seg_needed else 1200
-    for idx, dataset_file in enumerate(dataset_files, 1):
+    default_seg_chars = [",", ".", "?", "!"]
+
+    msgs: list[str] = []
+    html_blocks: dict[str, list[str]] = {
+        Path(d).stem: [] for d in dataset_files
+    }
+    counters: dict[str, int] = {Path(d).stem: 0 for d in dataset_files}
+    total_per_ds = len(prompts)
+
+    def fmt_counters() -> str:
+        """Return progress for each dataset as ``Model: current/total`` lines."""
+        return "\n".join(
+            f"{name}: {counters[name]}/{total_per_ds}" for name in counters
+        )
+
+    def build_html() -> str:
+        columns = []
+        for name, blocks in html_blocks.items():
+            column = [f"<div style='flex:1;padding-right:1em'><h3>{name}</h3>"]
+            column.extend(blocks)
+            column.append("</div>")
+            columns.append("".join(column))
+        return "<div style='display:flex;gap:1em'>" + "".join(columns) + "</div>"
+
+    progress = gr.Progress()
+    total_steps = len(dataset_files) * (len(prompts) + 2)
+    step = 0
+
+    # Initial counter display
+    yield "", fmt_counters(), gr.update(value=build_html(), visible=False)
+
+    for dataset_file in dataset_files:
         if STOP_FLAG:
             STOP_FLAG = False
-            return "Stopped", ""
+            yield "Stopped", fmt_counters(), gr.update(value=build_html(), visible=any(html_blocks.values()))
+            return
         ds_name = Path(dataset_file).stem
         audio_path = SOURCE_AUDIO_DIR / dataset_file
         dataset_dir = DATASETS_DIR / ds_name
         lora_dir = LORA_DIR / ds_name / "lora_model"
-        base_progress = (idx - 1) / total
+
+        progress(step / total_steps, desc=f"Preparing {ds_name}")
         if not dataset_dir.is_dir():
-            progress(base_progress, desc=f"Preparing {ds_name}")
             prepare_dataset(str(audio_path), str(dataset_dir))
             msgs.append(f"{ds_name}: dataset prepared")
         else:
             msgs.append(f"{ds_name}: dataset already prepared")
+        step += 1
+        yield "\n".join(msgs), fmt_counters(), gr.update(value=build_html(), visible=any(html_blocks.values()))
         if STOP_FLAG:
             STOP_FLAG = False
-            return "Stopped", ""
+            yield "Stopped", fmt_counters(), gr.update(value=build_html(), visible=any(html_blocks.values()))
+            return
+
+        progress(step / total_steps, desc=f"Training {ds_name}")
         if not lora_dir.is_dir():
-            progress(base_progress + 0.33 / total, desc=f"Training {ds_name}")
             train_lora_single(str(dataset_dir), ds_name, True)
             msgs.append(f"{ds_name}: LoRA trained")
         else:
             msgs.append(f"{ds_name}: LoRA already trained")
+        step += 1
+        yield "\n".join(msgs), fmt_counters(), gr.update(value=build_html(), visible=any(html_blocks.values()))
         if STOP_FLAG:
             STOP_FLAG = False
-            return "Stopped", ""
-        progress(base_progress + 0.66 / total, desc=f"Generating {ds_name}")
-        html, _ = generate_batch(
-            prompts,
-            [ds_name],
-            temperature=0.6,
-            top_p=0.95,
-            repetition_penalty=1.1,
-            max_new_tokens=max_tokens,
-            segment=seg_needed,
-            segment_by="sentence",
-            seg_chars=[",", ".", "?", "!"] if seg_needed else None,
-            seg_min_tokens=0,
-            seg_max_tokens=50,
-            seg_gap=0.0,
-            fade_ms=fade_ms,
-        )
-        html_blocks.append(html)
+            yield "Stopped", fmt_counters(), gr.update(value=build_html(), visible=any(html_blocks.values()))
+            return
+
+        for text in prompts:
+            progress(step / total_steps, desc=f"Generating {ds_name}")
+            if seg_needed:
+                path = generate_audio(
+                    text,
+                    ds_name,
+                    temperature=temperature,
+                    top_p=top_p,
+                    repetition_penalty=repetition_penalty,
+                    max_new_tokens=max_tokens,
+                    segment=True,
+                    segment_by="sentence",
+                    seg_chars=default_seg_chars,
+                    seg_min_tokens=0,
+                    seg_max_tokens=50,
+                    seg_gap=0.0,
+                    fade_ms=fade_ms,
+                )
+            else:
+                path = generate_audio(
+                    text,
+                    ds_name,
+                    temperature=temperature,
+                    top_p=top_p,
+                    repetition_penalty=repetition_penalty,
+                    max_new_tokens=max_tokens,
+                    segment=False,
+                    fade_ms=fade_ms,
+                )
+
+            try:
+                with open(path, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("ascii")
+                src = f"data:audio/wav;base64,{b64}"
+            except Exception:
+                logger.exception("Failed to read %s", path)
+                src = ""
+            html_blocks[ds_name].append(
+                "".join(
+                    [
+                        "<div style='margin-bottom:1em'>",
+                        f"<p>{text[:60]}</p>",
+                        f"<audio controls src='{src}'></audio>",
+                        "</div>",
+                    ]
+                )
+            )
+            counters[ds_name] += 1
+            step += 1
+            yield "\n".join(msgs), fmt_counters(), gr.update(value=build_html(), visible=any(html_blocks.values()))
+            if STOP_FLAG:
+                STOP_FLAG = False
+                yield "Stopped", fmt_counters(), gr.update(value=build_html(), visible=any(html_blocks.values()))
+                return
     progress(1, desc="Done")
-    return "\n".join(msgs), "<hr/>".join(html_blocks)
+    yield "\n".join(msgs), fmt_counters(), gr.update(value=build_html(), visible=any(html_blocks.values()))
 
 
 # ---- Gradio Interface ----
@@ -967,32 +1071,55 @@ def refresh_lists() -> tuple[gr.components.Dropdown, gr.components.Dropdown]:
         gr.update(choices=[""] + list_prompt_files()),
     )
 
-with gr.Blocks() as demo:
+CSS = """
+#top-right-buttons {
+    display: flex;
+    justify-content: flex-end;
+}
+"""
+
+with gr.Blocks(css=CSS) as demo:
     gr.Markdown("# OrpheusX Gradio Interface")
 
-    refresh_btn = gr.Button("Refresh directories")
-    stop_btn = gr.Button("Stop Task")
-    exit_btn = gr.Button("Exit")
+    with gr.Row(elem_id="top-right-buttons"):
+        refresh_btn = gr.Button("Refresh directories", size="sm")
+        stop_btn = gr.Button("Stop Task", size="sm")
+        exit_btn = gr.Button("Exit", size="sm")
 
     with gr.Tabs():
         with gr.Tab("Unified"):
-            with gr.Tabs():
-                with gr.Tab("Auto Pipeline"):
+            with gr.Row():
+                with gr.Column(scale=65):
                     auto_dataset = gr.Dropdown(choices=list_source_audio(), label="Dataset", multiselect=True)
-                    auto_status = gr.Markdown()
                     auto_prompt = gr.Textbox(label="Prompt")
                     auto_batch = gr.Slider(1, 5, step=1, value=1, label="Batch")
                     auto_prompt_file = gr.Dropdown(choices=[""] + prompt_files, label="Prompt List")
                     auto_btn = gr.Button("Run Pipeline")
-                    auto_log = gr.Textbox()
-                    auto_output = gr.HTML()
+                    with gr.Row():
+                        auto_log = gr.Textbox(scale=1)
+                        auto_counter = gr.Textbox(scale=1)
+                    auto_output = gr.HTML(visible=False)
+                with gr.Column(scale=35):
+                    with gr.Accordion("Advanced Settings", open=False):
+                        adv_temperature = gr.Slider(0.1, 1.0, value=0.6, step=0.05, label="Temperature")
+                        adv_top_p = gr.Slider(0.5, 1.0, value=0.95, step=0.05, label="Top-p")
+                        adv_repeat = gr.Slider(1.0, 2.0, value=1.1, step=0.05, label="Repetition Penalty")
+                        adv_fade_ms = gr.Slider(0, 1000, value=60, step=10, label="Crossfade (ms)")
 
-                    auto_dataset.change(dataset_status_multi, auto_dataset, auto_status)
-                    auto_btn.click(
-                        run_full_pipeline_batch,
-                        [auto_dataset, auto_prompt, auto_prompt_file, auto_batch],
-                        [auto_log, auto_output],
-                    )
+            auto_btn.click(
+                run_full_pipeline_batch,
+                [
+                    auto_dataset,
+                    auto_prompt,
+                    auto_prompt_file,
+                    auto_batch,
+                    adv_temperature,
+                    adv_top_p,
+                    adv_repeat,
+                    adv_fade_ms,
+                ],
+                [auto_log, auto_counter, auto_output],
+            )
 
     refresh_btn.click(
         refresh_lists,
@@ -1002,4 +1129,5 @@ with gr.Blocks() as demo:
     stop_btn.click(stop_current, None, None)
     exit_btn.click(exit_app, None, None)
 if __name__ == "__main__":
+    demo.queue(default_concurrency_limit=2)
     demo.launch(server_port=18188)
