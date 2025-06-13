@@ -842,6 +842,7 @@ def dataset_status_multi(names: list[str]) -> str:
 
 
 
+
 def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tuple[str, str]:
     """Prepare dataset, train LoRA and run inference."""
     global STOP_FLAG
@@ -1076,7 +1077,6 @@ with gr.Blocks() as demo:
             with gr.Tabs():
                 with gr.Tab("Auto Pipeline"):
                     auto_dataset = gr.Dropdown(choices=list_source_audio(), label="Dataset", multiselect=True)
-                    auto_status = gr.Markdown()
                     auto_prompt = gr.Textbox(label="Prompt")
                     auto_batch = gr.Slider(1, 5, step=1, value=1, label="Batch")
                     auto_prompt_file = gr.Dropdown(choices=[""] + prompt_files, label="Prompt List")
@@ -1086,7 +1086,6 @@ with gr.Blocks() as demo:
                         auto_counter = gr.Textbox(scale=1)
                     auto_output = gr.HTML(visible=False)
 
-                    auto_dataset.change(dataset_status_multi, auto_dataset, auto_status)
                     auto_btn.click(
                         run_full_pipeline_batch,
                         [auto_dataset, auto_prompt, auto_prompt_file, auto_batch],
