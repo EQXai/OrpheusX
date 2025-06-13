@@ -827,19 +827,19 @@ def dataset_status(name: str) -> str:
     return "Model not created"
 
 
-def dataset_status_multi(names: list[str]) -> str:
-    """Return status for multiple datasets."""
+def dataset_status_multi(names: typing.Any) -> str:
+    """Return status for one or more datasets."""
+    if not names:
+        return ""
+    if isinstance(names, str):
+        names = [names]
     msgs: list[str] = []
     for name in names:
-        ds_name = Path(name).stem
+        ds_name = Path(str(name)).stem
         lora_path = LORA_DIR / ds_name / "lora_model"
-        if lora_path.is_dir():
-            status = "Model already created"
-        else:
-            status = "Model not created"
+        status = "Model already created" if lora_path.is_dir() else "Model not created"
         msgs.append(f"{ds_name}: {status}")
     return "<br>".join(msgs)
-
 
 
 
