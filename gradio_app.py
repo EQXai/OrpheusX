@@ -818,6 +818,30 @@ def generate_batch(
 
 
 
+def dataset_status(name: str) -> str:
+    """Return model status message for a dataset."""
+    ds_name = Path(name).stem
+    lora_path = LORA_DIR / ds_name / "lora_model"
+    if lora_path.is_dir():
+        return "Model already created"
+    return "Model not created"
+
+
+def dataset_status_multi(names: list[str]) -> str:
+    """Return status for multiple datasets."""
+    msgs: list[str] = []
+    for name in names:
+        ds_name = Path(name).stem
+        lora_path = LORA_DIR / ds_name / "lora_model"
+        if lora_path.is_dir():
+            status = "Model already created"
+        else:
+            status = "Model not created"
+        msgs.append(f"{ds_name}: {status}")
+    return "<br>".join(msgs)
+
+
+
 
 def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tuple[str, str]:
     """Prepare dataset, train LoRA and run inference."""
