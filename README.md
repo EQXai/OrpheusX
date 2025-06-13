@@ -7,7 +7,7 @@ OrpheusX is a powerful tool for creating, training, and running custom text-to-s
 ## 🛠️ System Requirements
 
 - **Python** ≥ 3.10    
-- **CUDA Toolkit**: **version 12.4 only**  
+- **CUDA Toolkit**: **version 12.4**  
   ⚠️ *Using a newer CUDA version may cause installation issues.*
 
 ---
@@ -33,7 +33,6 @@ Activate venv::
 source venv/bin/activate
 ```
 
-To start:
 
 ## 🌐 Gradio Interface
 
@@ -51,6 +50,6 @@ python gradio_app.py
 
 #  Output Directory:
 
-- The output of the processed audio files can be found in: `scripts/audio_output/`
+- The output of the processed audio files can be found in: `audio_output/`
   
 ---
