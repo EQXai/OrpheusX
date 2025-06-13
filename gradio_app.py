@@ -730,7 +730,13 @@ def generate_audio(
     lora_name = lora_name or "base_model"
     path = get_output_path(lora_name)
     import torchaudio
-    torchaudio.save(str(path), final_audio.detach().cpu(), 24000)
+    torchaudio.save(
+        str(path),
+        final_audio.detach().cpu(),
+        24000,
+        encoding="PCM_S",
+        bits_per_sample=16,
+    )
     torch.cuda.empty_cache()
     gc.collect()
     logger.info("Saved audio to %s", path)
