@@ -1065,32 +1065,38 @@ def refresh_lists() -> tuple[gr.components.Dropdown, gr.components.Dropdown]:
         gr.update(choices=[""] + list_prompt_files()),
     )
 
-with gr.Blocks() as demo:
+CSS = """
+#top-right-buttons {
+    display: flex;
+    justify-content: flex-end;
+}
+"""
+
+with gr.Blocks(css=CSS) as demo:
     gr.Markdown("# OrpheusX Gradio Interface")
 
-    refresh_btn = gr.Button("Refresh directories")
-    stop_btn = gr.Button("Stop Task")
-    exit_btn = gr.Button("Exit")
+    with gr.Row(elem_id="top-right-buttons"):
+        refresh_btn = gr.Button("Refresh directories", size="sm")
+        stop_btn = gr.Button("Stop Task", size="sm")
+        exit_btn = gr.Button("Exit", size="sm")
 
     with gr.Tabs():
         with gr.Tab("Unified"):
-            with gr.Tabs():
-                with gr.Tab("Auto Pipeline"):
-                    auto_dataset = gr.Dropdown(choices=list_source_audio(), label="Dataset", multiselect=True)
-                    auto_prompt = gr.Textbox(label="Prompt")
-                    auto_batch = gr.Slider(1, 5, step=1, value=1, label="Batch")
-                    auto_prompt_file = gr.Dropdown(choices=[""] + prompt_files, label="Prompt List")
-                    auto_btn = gr.Button("Run Pipeline")
-                    with gr.Row():
-                        auto_log = gr.Textbox(scale=1)
-                        auto_counter = gr.Textbox(scale=1)
-                    auto_output = gr.HTML(visible=False)
+            auto_dataset = gr.Dropdown(choices=list_source_audio(), label="Dataset", multiselect=True)
+            auto_prompt = gr.Textbox(label="Prompt")
+            auto_batch = gr.Slider(1, 5, step=1, value=1, label="Batch")
+            auto_prompt_file = gr.Dropdown(choices=[""] + prompt_files, label="Prompt List")
+            auto_btn = gr.Button("Run Pipeline")
+            with gr.Row():
+                auto_log = gr.Textbox(scale=1)
+                auto_counter = gr.Textbox(scale=1)
+            auto_output = gr.HTML(visible=False)
 
-                    auto_btn.click(
-                        run_full_pipeline_batch,
-                        [auto_dataset, auto_prompt, auto_prompt_file, auto_batch],
-                        [auto_log, auto_counter, auto_output],
-                    )
+            auto_btn.click(
+                run_full_pipeline_batch,
+                [auto_dataset, auto_prompt, auto_prompt_file, auto_batch],
+                [auto_log, auto_counter, auto_output],
+            )
 
     refresh_btn.click(
         refresh_lists,
