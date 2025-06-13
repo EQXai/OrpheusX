@@ -809,6 +809,17 @@ def dataset_status(name: str) -> str:
     return "Model already created" if lora_path.is_dir() else ""
 
 
+def dataset_status_multi(names: list[str]) -> str:
+    """Return status for multiple datasets."""
+    msgs: list[str] = []
+    for name in names:
+        ds_name = Path(name).stem
+        lora_path = LORA_DIR / ds_name / "lora_model"
+        status = "Model already created" if lora_path.is_dir() else ""
+        msgs.append(f"{ds_name}: {status}")
+    return "\n".join(msgs)
+
+
 def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tuple[str, str]:
     """Prepare dataset, train LoRA and run inference."""
     global STOP_FLAG
@@ -867,16 +878,94 @@ def run_full_pipeline(dataset_file: str, prompt: str, fade_ms: int = 60) -> tupl
     return "\n".join(msgs), out_path
 
 
+def run_full_pipeline_batch(
+    dataset_files: list[str],
+    prompt: str,
+    prompt_file: str | None,
+    batch: int,
+    fade_ms: int = 60,
+) -> tuple[str, str]:
+    """Run the full pipeline for multiple datasets and prompts."""
+    global STOP_FLAG
+    if not dataset_files:
+        return "No dataset selected", ""
+    if prompt_file:
+        prompts = load_prompts(prompt_file)
+        if not prompts:
+            return "Prompt list is empty", ""
+    else:
+        if not prompt:
+            return "Prompt is empty", ""
+        prompts = [prompt] * max(1, int(batch or 1))
+    msgs: list[str] = []
+    html_blocks: list[str] = []
+    total = len(dataset_files)
+    progress = gr.Progress()
+    tokenizer = get_pipeline_tokenizer()
+    seg_needed = any(
+        len(tokenizer(p, add_special_tokens=False).input_ids) > 50 for p in prompts
+    )
+    max_tokens = 2400 if seg_needed else 1200
+    for idx, dataset_file in enumerate(dataset_files, 1):
+        if STOP_FLAG:
+            STOP_FLAG = False
+            return "Stopped", ""
+        ds_name = Path(dataset_file).stem
+        audio_path = SOURCE_AUDIO_DIR / dataset_file
+        dataset_dir = DATASETS_DIR / ds_name
+        lora_dir = LORA_DIR / ds_name / "lora_model"
+        base_progress = (idx - 1) / total
+        if not dataset_dir.is_dir():
+            progress(base_progress, desc=f"Preparing {ds_name}")
+            prepare_dataset(str(audio_path), str(dataset_dir))
+            msgs.append(f"{ds_name}: dataset prepared")
+        else:
+            msgs.append(f"{ds_name}: dataset already prepared")
+        if STOP_FLAG:
+            STOP_FLAG = False
+            return "Stopped", ""
+        if not lora_dir.is_dir():
+            progress(base_progress + 0.33 / total, desc=f"Training {ds_name}")
+            train_lora_single(str(dataset_dir), ds_name, True)
+            msgs.append(f"{ds_name}: LoRA trained")
+        else:
+            msgs.append(f"{ds_name}: LoRA already trained")
+        if STOP_FLAG:
+            STOP_FLAG = False
+            return "Stopped", ""
+        progress(base_progress + 0.66 / total, desc=f"Generating {ds_name}")
+        html, _ = generate_batch(
+            prompts,
+            [ds_name],
+            temperature=0.6,
+            top_p=0.95,
+            repetition_penalty=1.1,
+            max_new_tokens=max_tokens,
+            segment=seg_needed,
+            segment_by="sentence",
+            seg_chars=[",", ".", "?", "!"] if seg_needed else None,
+            seg_min_tokens=0,
+            seg_max_tokens=50,
+            seg_gap=0.0,
+            fade_ms=fade_ms,
+        )
+        html_blocks.append(html)
+    progress(1, desc="Done")
+    return "\n".join(msgs), "<hr/>".join(html_blocks)
+
+
 # ---- Gradio Interface ----
 dataset_choices = list_datasets()
 lora_choices = list_loras()
 prompt_files = list_prompt_files()
 
 
-def refresh_lists() -> gr.components.Dropdown:
-
-    """Reload datasets, LoRAs and prompt lists from disk."""
-    return gr.update(choices=list_source_audio())
+def refresh_lists() -> tuple[gr.components.Dropdown, gr.components.Dropdown]:
+    """Reload dataset and prompt list choices from disk."""
+    return (
+        gr.update(choices=list_source_audio()),
+        gr.update(choices=[""] + list_prompt_files()),
+    )
 
 with gr.Blocks() as demo:
     gr.Markdown("# OrpheusX Gradio Interface")
@@ -889,20 +978,26 @@ with gr.Blocks() as demo:
         with gr.Tab("Unified"):
             with gr.Tabs():
                 with gr.Tab("Auto Pipeline"):
-                    auto_dataset = gr.Dropdown(choices=list_source_audio(), label="Dataset")
+                    auto_dataset = gr.Dropdown(choices=list_source_audio(), label="Dataset", multiselect=True)
                     auto_status = gr.Markdown()
                     auto_prompt = gr.Textbox(label="Prompt")
+                    auto_batch = gr.Slider(1, 5, step=1, value=1, label="Batch")
+                    auto_prompt_file = gr.Dropdown(choices=[""] + prompt_files, label="Prompt List")
                     auto_btn = gr.Button("Run Pipeline")
                     auto_log = gr.Textbox()
-                    auto_audio = gr.Audio(label="Output")
+                    auto_output = gr.HTML()
 
-                    auto_dataset.change(dataset_status, auto_dataset, auto_status)
-                    auto_btn.click(run_full_pipeline, [auto_dataset, auto_prompt], [auto_log, auto_audio])
+                    auto_dataset.change(dataset_status_multi, auto_dataset, auto_status)
+                    auto_btn.click(
+                        run_full_pipeline_batch,
+                        [auto_dataset, auto_prompt, auto_prompt_file, auto_batch],
+                        [auto_log, auto_output],
+                    )
 
     refresh_btn.click(
         refresh_lists,
         None,
-        [auto_dataset],
+        [auto_dataset, auto_prompt_file],
     )
     stop_btn.click(stop_current, None, None)
     exit_btn.click(exit_app, None, None)
