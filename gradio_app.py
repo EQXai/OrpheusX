@@ -1083,4 +1083,8 @@ with gr.Blocks() as demo:
     stop_btn.click(stop_current, None, None)
     exit_btn.click(exit_app, None, None)
 if __name__ == "__main__":
-    demo.launch(server_port=18188)
+    # Enable queuing so gr.Progress bars update correctly during long tasks.
+    # Some older Gradio versions don't accept extra parameters like
+    # ``concurrency_count`` or ``status_update_rate`` on ``queue()``.
+    # Using the default queue settings maximizes compatibility.
+    demo.queue().launch(server_port=18188, server_name="0.0.0.0")
