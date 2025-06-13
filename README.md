@@ -33,13 +33,9 @@ Activate venv::
 source venv/bin/activate
 ```
 
-Everything else (installation, dataset creation, training, inference) is handled interactively through the CLI.
-
 To start:
 
 ## 🌐 Gradio Interface
-
-If you prefer a simple web UI instead of the CLI, run:
 
 ```bash
 python gradio_app.py
